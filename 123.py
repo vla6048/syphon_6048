@@ -1,15 +1,6 @@
-from flask import Flask, jsonify, request
-from dotenv import load_dotenv
-import os
-import asyncio
-
-from db_manager import DatabaseManager
-
-load_dotenv()  # Загружаем переменные из .env файла
-
 # app.py
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from dotenv import load_dotenv
 import os
 import asyncio
@@ -18,43 +9,34 @@ from db_manager import DatabaseManager
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
-print(os.getenv('MYSQL_HOST_LOCAL'))
-print(os.getenv('MYSQL_HOST_REMOTE'))
 
 class MyApp:
     def __init__(self):
-        # Создание экземпляра Flask
         self.app = Flask(__name__)
 
         # Настройка подключения к базам данных
         self.local_db = DatabaseManager(
-            host=os.getenv('MYSQL_HOST_LOCAL'),
-            user=os.getenv('MYSQL_USER_LOCAL'),
-            password=os.getenv('MYSQL_PASSWORD_LOCAL'),
-            db=os.getenv('MYSQL_DB_LOCAL')
+            host=os.getenv('LOCAL_DB_HOST'),
+            user=os.getenv('LOCAL_DB_USER'),
+            password=os.getenv('LOCAL_DB_PASSWORD'),
+            db=os.getenv('LOCAL_DB_NAME')
         )
 
         self.remote_db = DatabaseManager(
-            host=os.getenv('MYSQL_HOST_REMOTE'),
-            user=os.getenv('MYSQL_USER_REMOTE'),
-            password=os.getenv('MYSQL_PASSWORD_REMOTE'),
-            db=os.getenv('MYSQL_DB_REMOTE')
+            host=os.getenv('REMOTE_DB_HOST'),
+            user=os.getenv('REMOTE_DB_USER'),
+            password=os.getenv('REMOTE_DB_PASSWORD'),
+            db=os.getenv('REMOTE_DB_NAME')
         )
 
-        # Настройка маршрутов
         self.setup_routes()
 
     def setup_routes(self):
-        @self.app.route('/')
-        async def index():
-            return jsonify({"message": "Добро пожаловать в Flask приложение!"})
-
         @self.app.route('/fetch-and-store', methods=['GET'])
         async def fetch_and_store():
             """
             Проверяет доступность удаленной базы данных, получает список IP-адресов из локальной базы,
-            извлекает данные из удаленной базы для этих IP-адресов и сохраняет их в локальной базе данных.
-            Возвращает количество новых записей, которые были добавлены.
+            и извлекает данные из удаленной базы для этих IP-адресов.
             """
             # Проверка доступности удаленной базы данных
             try:
@@ -67,7 +49,6 @@ class MyApp:
             ip_addresses = await self.local_db.execute_query(ip_query)
 
             if not ip_addresses:
-                await self.remote_db.close()
                 return jsonify({"error": "Не удалось получить IP-адреса из локальной базы данных."}), 500
 
             # Формируем список IP-адресов для SQL запроса
@@ -82,43 +63,15 @@ class MyApp:
             """
             remote_data = await self.remote_db.execute_query(remote_query)
 
-            # Закрытие соединения с удаленной базой данных
-            await self.remote_db.close()
-
             if not remote_data:
                 return jsonify({"error": "Не удалось получить данные из удаленной базы данных."}), 500
 
-            # Подсчет количества новых данных
-            new_data_count = len(remote_data)
-
-            # Вставка данных в локальную базу данных
-            insert_query = """
-            INSERT IGNORE INTO ntst_pinger_hosts_log (id, ip, start, stop, downtime)
-            VALUES (%s, %s, %s, %s, TIMESTAMPDIFF(SECOND, %s, %s))
-            """
-
-            for record in remote_data:
-                await self.local_db.execute_query(
-                    insert_query,
-                    (record[3], record[0], record[1], record[2], record[1], record[2])
-                )
-
-            return jsonify({
-                "message": "Данные успешно получены и сохранены в локальной базе данных.",
-                "new_data_count": new_data_count
-            })
+            # Здесь вы можете сохранить полученные данные в локальную базу или вернуть их как ответ
+            return jsonify({"message": "Данные успешно получены и обработаны.", "data": remote_data})
 
     def run(self):
         self.app.run(debug=True)
 
-
 if __name__ == '__main__':
-    # Создание экземпляра приложения
     my_app = MyApp()
-
-    # Запуск приложения
     my_app.run()
-
-
-
-
