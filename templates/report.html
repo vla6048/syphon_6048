@@ -4,12 +4,73 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report</title>
+    <style>
+        .report-container {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+        }
+        .plots-container {
+            flex: 3;
+            padding-right: 20px;
+        }
+        .table-container {
+            flex: 1;
+        }
+        .plot {
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
 </head>
 <body>
-    <h1>Generated Reports</h1>
-    {% for plot in plots %}
-        <h2>{{ plot.description }}</h2>
-        <img src="{{ plot.plot_url }}" alt="Plot">
-    {% endfor %}
+    <h1>Device Report</h1>
+
+    <div class="report-container">
+        <!-- Графики -->
+        <div class="plots-container">
+            {% for plot in plots %}
+                <div class="plot">
+                    <h2>{{ plot.description }}</h2>
+                    <img src="{{ plot.plot_url }}" alt="Plot for {{ plot.description }}" style="width: 100%;">
+                </div>
+            {% endfor %}
+        </div>
+
+        <!-- Таблица данных -->
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Power Downtime (hrs)</th>
+                        <th>Generator Downtime (hrs)</th>
+                        <th>Generator Uptime During Power Downtime (hrs)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in table_data %}
+                        <tr>
+                            <td>{{ row.description }}</td>
+                            <td>{{ row.power_downtime_hours }}</td>
+                            <td>{{ row.generator_downtime_hours }}</td>
+                            <td>{{ row.generator_uptime_during_power_downtime_hours }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </body>
 </html>

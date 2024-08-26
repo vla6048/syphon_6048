@@ -5,6 +5,7 @@ import asyncio
 import matplotlib.pyplot as plt
 import io
 import base64
+from datetime import datetime
 
 from db_manager import DatabaseManager
 
@@ -53,66 +54,75 @@ class MyApp:
                 devices_query = "SELECT id, description FROM devices WHERE device_type = 'power_control';"
                 devices = await self.local_db.execute_query(devices_query)
             else:
-                devices_query = "SELECT id, description FROM devices WHERE id = %s AND device_type = 'power_control';"
-                devices = await self.local_db.execute_query(devices_query, (selected_device,))
+                devices = [(selected_device, '')]
 
             plots = []
+            table_data = []
 
             for device_id, description in devices:
-                # Получение связанных генераторов
                 relations_query = """
-                SELECT d1.ip_address AS power_ip, d2.ip_address AS generator_ip
-                FROM device_relations AS r
-                JOIN devices AS d1 ON r.power_control_id = d1.id
+                SELECT d1.ip_address AS power_ip, d2.ip_address AS generator_ip, l.start, l.stop, l.downtime
+                FROM ntst_pinger_hosts_log AS l
+                JOIN devices AS d1 ON l.ip = d1.ip_address
+                JOIN device_relations AS r ON d1.id = r.power_control_id
                 JOIN devices AS d2 ON r.generator_control_id = d2.id
-                WHERE d1.id = %s;
+                WHERE d1.id = %s AND l.start BETWEEN %s AND %s;
                 """
-                relations = await self.local_db.execute_query(relations_query, (device_id,))
-                if not relations:
+                power_data = await self.local_db.execute_query(relations_query, (device_id, start_date, end_date))
+
+                if not power_data:
                     continue
 
-                # Получение данных по каждому устройству
-                for power_ip, generator_ip in relations:
-                    data_query = """
-                    SELECT l.start, l.stop, l.downtime, d.device_type
-                    FROM ntst_pinger_hosts_log AS l
-                    JOIN devices AS d ON l.ip = d.ip_address
-                    WHERE d.ip_address IN (%s, %s) AND l.start BETWEEN %s AND %s;
+                power_downtime_total = 0
+                generator_downtime_total = 0
+                generator_uptime_during_power_downtime = 0
+
+                plt.figure(figsize=(10, 4))
+                for power_ip, generator_ip, start, stop, downtime in power_data:
+                    plt.hlines(y=1, xmin=start, xmax=stop, colors='red' if downtime > 0 else 'green', linewidth=5)
+
+                    power_downtime_total += downtime
+
+                    generator_query = """
+                    SELECT start, stop, downtime
+                    FROM ntst_pinger_hosts_log
+                    WHERE ip = %s AND start BETWEEN %s AND %s;
                     """
-                    data = await self.local_db.execute_query(data_query, (power_ip, generator_ip, start_date, end_date))
+                    generator_data = await self.local_db.execute_query(generator_query, (generator_ip, start, stop))
 
-                    if not data:
-                        continue
+                    for gen_start, gen_stop, gen_downtime in generator_data:
+                        plt.hlines(y=2, xmin=gen_start, xmax=gen_stop, colors='red' if gen_downtime > 0 else 'green', linewidth=5)
 
-                    # Построение графика
-                    plt.figure(figsize=(12, 6))
-                    times = [record[0] for record in data] + [record[1] for record in data]
-                    times.sort()
-                    plt.plot(times, [1] * len(times), 'o', color='black')
+                        generator_downtime_total += gen_downtime
 
-                    for start, stop, downtime, device_type in data:
-                        color = 'red' if device_type == 'power_control' else 'green'
-                        plt.axvline(x=start, color=color, linestyle='--', label=f'{device_type} Downtime')
-                        plt.axvline(x=stop, color=color, linestyle='-', label=f'{device_type} Uptime')
+                        if downtime > 0 and gen_downtime == 0:
+                            generator_uptime_during_power_downtime += (min(stop, gen_stop) - max(start, gen_start)).total_seconds()
 
-                    plt.xlabel('Time')
-                    plt.ylabel('Status')
-                    plt.title(f'Device {description} - Power and Generator Control')
-                    plt.legend()
-                    plt.tight_layout()
+                plt.yticks([1, 2], ['Power Control', 'Generator Control'])
+                plt.xlabel('Time')
+                plt.ylabel('Device Status')
+                plt.title(f'Device {description} - Power and Generator Control')
+                plt.tight_layout()
 
-                    img = io.BytesIO()
-                    plt.savefig(img, format='png')
-                    img.seek(0)
-                    plot_url = base64.b64encode(img.getvalue()).decode()
-                    plt.close()
+                img = io.BytesIO()
+                plt.savefig(img, format='png')
+                img.seek(0)
+                plot_url = base64.b64encode(img.getvalue()).decode()
+                plt.close()
 
-                    plots.append({
-                        'description': description,
-                        'plot_url': f"data:image/png;base64,{plot_url}"
-                    })
+                plots.append({
+                    'description': description,
+                    'plot_url': f"data:image/png;base64,{plot_url}"
+                })
 
-            return await render_template('report.html', plots=plots)
+                table_data.append({
+                    'description': description,
+                    'power_downtime_hours': round(power_downtime_total / 3600, 2),
+                    'generator_downtime_hours': round(generator_downtime_total / 3600, 2),
+                    'generator_uptime_during_power_downtime_hours': round(generator_uptime_during_power_downtime / 3600, 2)
+                })
+
+            return await render_template('report.html', plots=plots, table_data=table_data)
         # @self.app.route('/')
         # async def index():
         #     return jsonify({"message": "Добро пожаловать в Quart приложение!"})
