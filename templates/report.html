@@ -4,73 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report</title>
-    <style>
-        .report-container {
-            display: flex;
-            flex-direction: row;
-            justify-content: space-between;
-        }
-        .plots-container {
-            flex: 3;
-            padding-right: 20px;
-        }
-        .table-container {
-            flex: 1;
-        }
-        .plot {
-            margin-bottom: 20px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            border: 1px solid black;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-    </style>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 </head>
 <body>
-    <h1>Device Report</h1>
+    <div class="container mt-5">
+        <h2 class="text-center">Downtime Report</h2>
 
-    <div class="report-container">
-        <!-- Графики -->
-        <div class="plots-container">
-            {% for plot in plots %}
-                <div class="plot">
-                    <h2>{{ plot.description }}</h2>
-                    <img src="{{ plot.plot_url }}" alt="Plot for {{ plot.description }}" style="width: 100%;">
-                </div>
-            {% endfor %}
-        </div>
-
-        <!-- Таблица данных -->
-        <div class="table-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Description</th>
-                        <th>Power Downtime (hrs)</th>
-                        <th>Generator Downtime (hrs)</th>
-                        <th>Generator Uptime During Power Downtime (hrs)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in table_data %}
-                        <tr>
-                            <td>{{ row.description }}</td>
-                            <td>{{ row.power_downtime_hours }}</td>
-                            <td>{{ row.generator_downtime_hours }}</td>
-                            <td>{{ row.generator_uptime_during_power_downtime_hours }}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        <table class="table table-striped table-bordered mt-4">
+            <thead>
+                <tr>
+                    <th scope="col">Power / Generator Description</th>
+                    <th scope="col">Power Control Downtime (hrs)</th>
+                    <th scope="col">Generator Control Downtime (hrs)</th>
+                    <th scope="col">Generator Uptime During Power Downtime (hrs)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in table_data %}
+                <tr>
+                    <td>{{ row.description }}</td>
+                    <td>{{ row.power_downtime_hours }}</td>
+                    <td>{{ row.generator_downtime_hours }}</td>
+                    <td>{{ row.generator_uptime_during_power_downtime_hours }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.0.7/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
 </html>

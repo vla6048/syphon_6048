@@ -56,73 +56,55 @@ class MyApp:
             else:
                 devices = [(selected_device, '')]
 
-            plots = []
             table_data = []
 
-            for device_id, description in devices:
-                relations_query = """
-                SELECT d1.ip_address AS power_ip, d2.ip_address AS generator_ip, l.start, l.stop, l.downtime
-                FROM ntst_pinger_hosts_log AS l
-                JOIN devices AS d1 ON l.ip = d1.ip_address
-                JOIN device_relations AS r ON d1.id = r.power_control_id
-                JOIN devices AS d2 ON r.generator_control_id = d2.id
-                WHERE d1.id = %s AND l.start BETWEEN %s AND %s;
+            relations_query = """
+            SELECT d1.id AS power_id, d1.description AS power_desc, d2.id AS generator_id, d2.description AS generator_desc
+            FROM device_relations AS r
+            JOIN devices AS d1 ON r.power_control_id = d1.id
+            JOIN devices AS d2 ON r.generator_control_id = d2.id;
+            """
+            relations_data = await self.local_db.execute_query(relations_query)
+
+            for relation in relations_data:
+                power_id, power_desc, generator_id, generator_desc = relation
+
+                # Запрос данных для power_control
+                power_downtime_query = """
+                SELECT SUM(downtime)
+                FROM ntst_pinger_hosts_log
+                WHERE ip = (SELECT ip_address FROM devices WHERE id = %s)
+                AND start BETWEEN %s AND %s;
                 """
-                power_data = await self.local_db.execute_query(relations_query, (device_id, start_date, end_date))
+                power_downtime_data = await self.local_db.execute_query(power_downtime_query,
+                                                                        (power_id, start_date, end_date))
+                total_power_downtime = power_downtime_data[0][0] if power_downtime_data[0][0] else 0
 
-                if not power_data:
-                    continue
+                # Запрос данных для generator_control
+                generator_downtime_query = """
+                SELECT SUM(downtime)
+                FROM ntst_pinger_hosts_log
+                WHERE ip = (SELECT ip_address FROM devices WHERE id = %s)
+                AND start BETWEEN %s AND %s;
+                """
+                generator_downtime_data = await self.local_db.execute_query(generator_downtime_query,
+                                                                            (generator_id, start_date, end_date))
+                total_generator_downtime = generator_downtime_data[0][0] if generator_downtime_data[0][0] else 0
 
-                power_downtime_total = 0
-                generator_downtime_total = 0
-                generator_uptime_during_power_downtime = 0
+                # Рассчет разницы между простоем power_control и generator_control
+                generator_uptime_during_power_downtime = max(0, (
+                            total_power_downtime - total_generator_downtime) / 3600)  # в часах
 
-                plt.figure(figsize=(10, 4))
-                for power_ip, generator_ip, start, stop, downtime in power_data:
-                    plt.hlines(y=1, xmin=start, xmax=stop, colors='red' if downtime > 0 else 'green', linewidth=5)
-
-                    power_downtime_total += downtime
-
-                    generator_query = """
-                    SELECT start, stop, downtime
-                    FROM ntst_pinger_hosts_log
-                    WHERE ip = %s AND start BETWEEN %s AND %s;
-                    """
-                    generator_data = await self.local_db.execute_query(generator_query, (generator_ip, start, stop))
-
-                    for gen_start, gen_stop, gen_downtime in generator_data:
-                        plt.hlines(y=2, xmin=gen_start, xmax=gen_stop, colors='red' if gen_downtime > 0 else 'green', linewidth=5)
-
-                        generator_downtime_total += gen_downtime
-
-                        if downtime > 0 and gen_downtime == 0:
-                            generator_uptime_during_power_downtime += (min(stop, gen_stop) - max(start, gen_start)).total_seconds()
-
-                plt.yticks([1, 2], ['Power Control', 'Generator Control'])
-                plt.xlabel('Time')
-                plt.ylabel('Device Status')
-                plt.title(f'Device {description} - Power and Generator Control')
-                plt.tight_layout()
-
-                img = io.BytesIO()
-                plt.savefig(img, format='png')
-                img.seek(0)
-                plot_url = base64.b64encode(img.getvalue()).decode()
-                plt.close()
-
-                plots.append({
-                    'description': description,
-                    'plot_url': f"data:image/png;base64,{plot_url}"
-                })
-
+                # Добавление строки в таблицу с округлением до 2 знаков после запятой
                 table_data.append({
-                    'description': description,
-                    'power_downtime_hours': round(power_downtime_total / 3600, 2),
-                    'generator_downtime_hours': round(generator_downtime_total / 3600, 2),
-                    'generator_uptime_during_power_downtime_hours': round(generator_uptime_during_power_downtime / 3600, 2)
+                    'description': f"{power_desc}",
+                    'power_downtime_hours': round(total_power_downtime / 3600, 2),  # в часах
+                    'generator_downtime_hours': round(total_generator_downtime / 3600, 2),  # в часах
+                    'generator_uptime_during_power_downtime_hours': round(generator_uptime_during_power_downtime, 2)
                 })
 
-            return await render_template('report.html', plots=plots, table_data=table_data)
+            # Передача данных в шаблон
+            return await render_template('report.html', table_data=table_data)
         # @self.app.route('/')
         # async def index():
         #     return jsonify({"message": "Добро пожаловать в Quart приложение!"})
