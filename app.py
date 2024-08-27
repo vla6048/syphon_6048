@@ -48,16 +48,8 @@ class MyApp:
         async def generate_report():
             start_date = request.args.get('start_date')
             end_date = request.args.get('end_date')
-            selected_device = request.args.get('device')
 
-            if selected_device == 'all':
-                devices_query = "SELECT id, description FROM devices WHERE device_type = 'power_control';"
-                devices = await self.local_db.execute_query(devices_query)
-            else:
-                devices = [(selected_device, '')]
-
-            table_data = []
-
+            # Получаем все связки устройств из таблицы device_relations
             relations_query = """
             SELECT d1.id AS power_id, d1.description AS power_desc, d2.id AS generator_id, d2.description AS generator_desc
             FROM device_relations AS r
@@ -65,6 +57,8 @@ class MyApp:
             JOIN devices AS d2 ON r.generator_control_id = d2.id;
             """
             relations_data = await self.local_db.execute_query(relations_query)
+
+            table_data = []
 
             for relation in relations_data:
                 power_id, power_desc, generator_id, generator_desc = relation
@@ -91,9 +85,9 @@ class MyApp:
                                                                             (generator_id, start_date, end_date))
                 total_generator_downtime = generator_downtime_data[0][0] if generator_downtime_data[0][0] else 0
 
-                # Рассчет разницы между простоем power_control и generator_control
-                generator_uptime_during_power_downtime = max(0, (
-                            total_power_downtime - total_generator_downtime) / 3600)  # в часах
+                # Рассчет uptime генератора во время простоя power_control
+                generator_uptime_during_power_downtime = max(0,
+                                                             (total_power_downtime - total_generator_downtime) / 3600)
 
                 # Добавление строки в таблицу с округлением до 2 знаков после запятой
                 table_data.append({
@@ -104,7 +98,12 @@ class MyApp:
                 })
 
             # Передача данных в шаблон
-            return await render_template('report.html', table_data=table_data)
+            return await render_template('report.html',
+                                         table_data=table_data,
+                                         start_date=start_date,
+                                         end_date=end_date
+                                         )
+
         # @self.app.route('/')
         # async def index():
         #     return jsonify({"message": "Добро пожаловать в Quart приложение!"})

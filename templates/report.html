@@ -3,37 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Report</title>
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <title>Device Downtime Report</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
 </head>
 <body>
-    <div class="container mt-5">
-        <h2 class="text-center">Downtime Report</h2>
+<div class="container">
+    <h2 id="reportTitle">Device Downtime Report</h2>
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Device Pair</th>
+                <th>Power Control Downtime (hrs)</th>
+                <th>Generator Control Downtime (hrs)</th>
+                <th>Generator Uptime During Power Downtime (hrs)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in table_data %}
+            <tr>
+                <td>{{ row.description }}</td>
+                <td>{{ row.power_downtime_hours }}</td>
+                <td>{{ row.generator_downtime_hours }}</td>
+                <td>{{ row.generator_uptime_during_power_downtime_hours }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 
-        <table class="table table-striped table-bordered mt-4">
-            <thead>
-                <tr>
-                    <th scope="col">Power / Generator Description</th>
-                    <th scope="col">Power Control Downtime (hrs)</th>
-                    <th scope="col">Generator Control Downtime (hrs)</th>
-                    <th scope="col">Generator Uptime During Power Downtime (hrs)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in table_data %}
-                <tr>
-                    <td>{{ row.description }}</td>
-                    <td>{{ row.power_downtime_hours }}</td>
-                    <td>{{ row.generator_downtime_hours }}</td>
-                    <td>{{ row.generator_uptime_during_power_downtime_hours }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+<script>
+    $(document).ready(function() {
+        // Получаем даты из переданных переменных
+        var startDate = new Date("{{ start_date }}");
+        var endDate = new Date("{{ end_date }}");
 
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.0.7/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+        // Опции для форматирования дат
+        var options = { year: 'numeric', month: 'long', day: 'numeric' };
+
+        // Форматируем и выводим заголовок с датами
+        $('#reportTitle').text('Device Downtime Report (' + startDate.toLocaleDateString('en-US', options) + ' - ' + endDate.toLocaleDateString('en-US', options) + ')');
+    });
+</script>
 </body>
 </html>

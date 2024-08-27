@@ -3,26 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Select Report Parameters</title>
+    <title>Device Statistics</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
 </head>
 <body>
-    <h1>Select Report Parameters</h1>
-    <form action="/generate-report" method="get">
-        <label for="start_date">Start Date:</label>
-        <input type="date" id="start_date" name="start_date" required>
-        <br>
-        <label for="end_date">End Date:</label>
-        <input type="date" id="end_date" name="end_date" required>
-        <br>
-        <label for="device">Select Device:</label>
-        <select id="device" name="device">
-            <option value="all">All Devices</option>
-            {% for device in devices %}
-                <option value="{{ device[0] }}">{{ device[1] }}</option>
-            {% endfor %}
-        </select>
-        <br>
-        <button type="submit">Generate Report</button>
+<div class="container">
+    <h2>Device Downtime Report</h2>
+    <form id="reportForm" method="GET" action="/generate-report">
+        <div class="form-group">
+            <label for="start_date">Start Date:</label>
+            <input type="date" class="form-control" id="start_date" name="start_date" required>
+        </div>
+        <div class="form-group">
+            <label for="end_date">End Date:</label>
+            <input type="date" class="form-control" id="end_date" name="end_date" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Generate Report</button>
     </form>
+    <br>
+    <button id="refreshDataBtn" class="btn btn-secondary">Refresh Data</button>
+    <div id="message"></div>
+</div>
+
+<script>
+    $(document).ready(function() {
+        $('#refreshDataBtn').click(function() {
+            $('#message').text('Refreshing data, please wait...');
+            $.get('/fetch-and-store', function(response) {
+                if (response.error) {
+                    $('#message').html('<div class="alert alert-danger">' + response.error + '</div>');
+                } else {
+                    $('#message').html('<div class="alert alert-success">' + response.message + '</div>');
+                }
+            });
+        });
+    });
+</script>
 </body>
 </html>
