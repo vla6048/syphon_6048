@@ -1,4 +1,5 @@
 from quart import Quart, render_template, request, jsonify
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
 import os
 import asyncio
@@ -12,10 +13,19 @@ from db_manager import DatabaseManager
 # Загрузка переменных окружения из .env файла
 load_dotenv()
 
+
+class User(UserMixin):
+    def __init__(self, id, username, password):
+        self.id = id
+        self.username = username
+        self.password = password
+
+
 class MyApp:
     def __init__(self):
         # Создание экземпляра Quart
         self.app = Quart(__name__)
+
 
         # Настройка подключения к базам данных
         self.local_db = DatabaseManager(
@@ -97,9 +107,21 @@ class MyApp:
                     'generator_uptime_during_power_downtime_hours': round(generator_uptime_during_power_downtime, 2)
                 })
 
+            # Дополнительный запрос для суммарного времени простоя всех устройств power_control
+            total_downtime_query = """
+            SELECT d.description, SUM(l.downtime) / 3600 AS total_downtime_hours
+            FROM devices AS d
+            LEFT JOIN ntst_pinger_hosts_log AS l ON d.ip_address = l.ip
+            WHERE d.device_type = 'power_control'
+            AND l.start BETWEEN %s AND %s
+            GROUP BY d.description;
+            """
+            total_downtime_data = await self.local_db.execute_query(total_downtime_query, (start_date, end_date))
+
             # Передача данных в шаблон
             return await render_template('report.html',
                                          table_data=table_data,
+                                         total_downtime_data=total_downtime_data,
                                          start_date=start_date,
                                          end_date=end_date
                                          )
@@ -142,7 +164,7 @@ class MyApp:
             # Запрос данных из удаленной базы данных для полученных IP-адресов
             remote_query = f"""
             SELECT hl.ip, hl.start, hl.stop, hl.id
-            FROM pinger.`HostLogs` AS hl
+            FROM pinger.HostLogs AS hl
             WHERE hl.ip IN ({formatted_ips})
             AND hl.id NOT IN ({formatted_ids});
             """
