@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Протоколы</title>
+</head>
+<body>
+    <h1>Протоколы по договору {{ agreement.agreement_name }}</h1>
+    <h3>Мастер: {{ agreement.master_name }}</h3>
+    <h3>Инженер: {{ agreement.ri_name }}</h3>
+
+    {% if protocols %}
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Месяц и год</th>
+                <th>Сумма</th>
+                <th>Сумма прописью</th>
+                <th>АКТ</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for proto in protocols %}
+            <tr>
+                <td>{{ proto.proto_date }}</td>
+                <td>{{ proto.proto_sum }}</td>
+                <td>{{ proto.proto_sum_caps }}</td>
+                <td><button disabled>АКТ</button></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>Нет данных о протоколах по этому договору.</p>
+    {% endif %}
+
+    <h2>Добавить новый протокол</h2>
+    <form method="POST">
+        <label for="proto_date">Дата протокола:</label>
+        <input type="date" id="proto_date" name="proto_date" required><br>
+
+        <label for="proto_sum">Сумма протокола:</label>
+        <input type="number" id="proto_sum" name="proto_sum" step="0.01" required><br>
+
+        <label for="proto_sum_caps">Сумма прописью:</label>
+        <input type="text" id="proto_sum_caps" name="proto_sum_caps" required><br>
+
+        <button type="submit">Сохранить</button>
+    </form>
+</body>
+</html>

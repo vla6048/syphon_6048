@@ -1,6 +1,5 @@
-# app.py
-
-from flask import Flask, jsonify
+from quart import Quart, render_template, request, jsonify
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
 import os
 import asyncio
@@ -10,68 +9,94 @@ from db_manager import DatabaseManager
 # Загрузка переменных окружения из .env файла
 load_dotenv()
 
-class MyApp:
-    def __init__(self):
-        self.app = Flask(__name__)
 
-        # Настройка подключения к базам данных
-        self.local_db = DatabaseManager(
-            host=os.getenv('LOCAL_DB_HOST'),
-            user=os.getenv('LOCAL_DB_USER'),
-            password=os.getenv('LOCAL_DB_PASSWORD'),
-            db=os.getenv('LOCAL_DB_NAME')
-        )
+# Класс пользователя
+class User(UserMixin):
+    def __init__(self, id, username, password):
+        self.id = id
+        self.username = username
+        self.password = password
 
-        self.remote_db = DatabaseManager(
-            host=os.getenv('REMOTE_DB_HOST'),
-            user=os.getenv('REMOTE_DB_USER'),
-            password=os.getenv('REMOTE_DB_PASSWORD'),
-            db=os.getenv('REMOTE_DB_NAME')
-        )
 
-        self.setup_routes()
+# Создание экземпляра Quart
+app = Quart(__name__)
+app.secret_key = 'your_secret_key'
 
-    def setup_routes(self):
-        @self.app.route('/fetch-and-store', methods=['GET'])
-        async def fetch_and_store():
-            """
-            Проверяет доступность удаленной базы данных, получает список IP-адресов из локальной базы,
-            и извлекает данные из удаленной базы для этих IP-адресов.
-            """
-            # Проверка доступности удаленной базы данных
-            try:
-                await self.remote_db.connect()
-            except Exception as e:
-                return jsonify({"error": "Удаленная база данных недоступна, попробуйте позже."}), 503
+# Настройка LoginManager для Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
 
-            # Получение списка IP-адресов из локальной базы данных
-            ip_query = "SELECT ip_address FROM dbsyphon.devices;"
-            ip_addresses = await self.local_db.execute_query(ip_query)
+# Настройка базы данных (вынесено за класс MyApp)
+local_db = DatabaseManager(
+    host=os.getenv('MYSQL_HOST_LOCAL'),
+    user=os.getenv('MYSQL_USER_LOCAL'),
+    password=os.getenv('MYSQL_PASSWORD_LOCAL'),
+    db=os.getenv('MYSQL_DB_LOCAL')
+)
 
-            if not ip_addresses:
-                return jsonify({"error": "Не удалось получить IP-адреса из локальной базы данных."}), 500
+remote_db = DatabaseManager(
+    host=os.getenv('MYSQL_HOST_REMOTE'),
+    user=os.getenv('MYSQL_USER_REMOTE'),
+    password=os.getenv('MYSQL_PASSWORD_REMOTE'),
+    db=os.getenv('MYSQL_DB_REMOTE')
+)
 
-            # Формируем список IP-адресов для SQL запроса
-            ip_list = [ip[0] for ip in ip_addresses]
-            formatted_ips = ','.join(f"'{ip}'" for ip in ip_list)
 
-            # Запрос данных из удаленной базы данных для полученных IP-адресов
-            remote_query = f"""
-            SELECT hl.ip, hl.start, hl.stop, hl.id
-            FROM pinger.`HostLogs` AS hl
-            WHERE hl.ip IN ({formatted_ips});
-            """
-            remote_data = await self.remote_db.execute_query(remote_query)
+# Функция для загрузки пользователя по ID (асинхронно)
+@login_manager.user_loader
+async def load_user(user_id):
+    # Здесь можно реализовать загрузку пользователя из базы данных
+    # Например:
+    query = "SELECT id, username, password FROM users WHERE id = %s"
+    user_data = await local_db.execute_query(query, (user_id,))
 
-            if not remote_data:
-                return jsonify({"error": "Не удалось получить данные из удаленной базы данных."}), 500
+    if user_data:
+        return User(user_data[0][0], user_data[0][1], user_data[0][2])
+    return None
 
-            # Здесь вы можете сохранить полученные данные в локальную базу или вернуть их как ответ
-            return jsonify({"message": "Данные успешно получены и обработаны.", "data": remote_data})
 
-    def run(self):
-        self.app.run(debug=True)
+# Настройка маршрутов
+@app.route('/')
+@app.route('/index')
+async def index():
+    devices_query = "SELECT id, description FROM devices WHERE device_type = 'power_control';"
+    devices = await local_db.execute_query(devices_query)
+    return await render_template('index.html', devices=devices)
+
+
+# Маршрут для логина
+@app.route('/login', methods=['POST'])
+async def login():
+    form = await request.form
+    username = form.get('username')
+    password = form.get('password')
+
+    # Поиск пользователя в базе данных
+    query = "SELECT id, username, password FROM users WHERE username = %s AND password = %s"
+    user_data = await local_db.execute_query(query, (username, password))
+
+    if user_data:
+        user = User(user_data[0][0], user_data[0][1], user_data[0][2])
+        login_user(user)
+        return jsonify({"message": "Logged in successfully!"})
+
+    return jsonify({"error": "Invalid credentials!"}), 401
+
+
+# Маршрут для выхода
+@app.route('/logout')
+@login_required
+async def logout():
+    logout_user()
+    return jsonify({"message": "Logged out successfully!"})
+
+
+# Пример защищенного маршрута
+@app.route('/protected')
+@login_required
+async def protected():
+    return jsonify({"message": f"Logged in as: {current_user.username}"})
+
 
 if __name__ == '__main__':
-    my_app = MyApp()
-    my_app.run()
+    app.run(debug=True)

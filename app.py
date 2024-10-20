@@ -1,4 +1,4 @@
-from quart import Quart, render_template, request, jsonify
+from quart import Quart, render_template, request, jsonify,redirect, url_for
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from dotenv import load_dotenv
 import os
@@ -12,13 +12,6 @@ from db_manager import DatabaseManager
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
-
-
-class User(UserMixin):
-    def __init__(self, id, username, password):
-        self.id = id
-        self.username = username
-        self.password = password
 
 
 class MyApp:
@@ -46,6 +39,106 @@ class MyApp:
         self.setup_routes()
 
     def setup_routes(self):
+
+        @self.app.route('/protocols/<int:agreement_id>', methods=['GET', 'POST'])
+        async def protocols(agreement_id):
+            if request.method == 'POST':
+                # Получение данных из формы
+                proto_date = (await request.form)['proto_date']
+                proto_sum = (await request.form)['proto_sum']
+                proto_sum_caps = (await request.form)['proto_sum_caps']
+
+                # Вставка данных протокола в базу данных
+                insert_query = """
+                INSERT INTO credentials.protocols (agreement, proto_date, proto_sum, proto_sum_caps)
+                VALUES (%s, %s, %s, %s);
+                """
+                await self.local_db.execute_query(insert_query, (agreement_id, proto_date, proto_sum, proto_sum_caps))
+
+                # Перезагрузка страницы после добавления данных без редиректа
+                return redirect(url_for('protocols', agreement_id=agreement_id))
+
+            # Запрос существующих протоколов по договору
+            protocols_query = """
+            SELECT p.proto_date, p.proto_sum, p.proto_sum_caps
+            FROM credentials.protocols AS p
+            WHERE p.agreement = %s;
+            """
+            protocols = await self.local_db.execute_query(protocols_query, (agreement_id,))
+
+            # Запрос данных о договоре
+            agreement_query = """
+            SELECT a.agreement_name, f.name AS master_name, r.name AS ri_name
+            FROM credentials.agreements AS a
+            JOIN credentials.fop_credentials AS f ON a.master_id = f.id
+            JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
+            WHERE a.id = %s;
+            """
+            agreement = await self.local_db.execute_query(agreement_query, (agreement_id,))
+
+            # Проверка на наличие договора
+            if not agreement:
+                return "Договор не найден", 404  # Или можно сделать редирект на другую страницу
+
+            return await render_template('protocols.html', protocols=protocols, agreement=agreement[0])
+
+        @self.app.route('/agreements', methods=['GET'])
+        async def agreements():
+            # SQL-запрос для получения информации о всех договорах
+            query = """
+            SELECT a.id, a.agreement_name, fc.name AS master_name, rc.name AS engineer_name
+            FROM credentials.agreements a
+            JOIN credentials.fop_credentials fc ON a.master_id = fc.id
+            JOIN credentials.ri_credentials rc ON a.ri_id = rc.id;
+            """
+
+            # Выполняем запрос и получаем данные
+            agreements_data = await self.local_db.execute_query(query)
+
+            # Передаем данные в шаблон
+            return await render_template('agreements.html', agreements=agreements_data)
+
+        @self.app.route('/fop-form')
+        async def fop_form():
+            # Отображение формы для внесения информации о ФОП
+            return await render_template('fop_form.html')
+
+        @self.app.route('/submit-fop', methods=['POST'])
+        async def submit_fop():
+            # Используем await для получения данных формы
+            form_data = await request.form
+
+            # Получаем значения полей из формы
+            position = form_data.get('position')
+            name = form_data.get('name')
+            inn = form_data.get('inn')
+            pidstava = form_data.get('pidstava')
+            address = form_data.get('address')
+            iban = form_data.get('iban')
+            bank_account_detail = form_data.get('bank_account_detail')
+            name_short = form_data.get('name_short')
+
+            # Выбор таблицы в зависимости от позиции
+            if position == 'Мастер':
+                table = 'credentials.fop_credentials'
+            elif position == 'Инженер':
+                table = 'credentials.ri_credentials'
+            else:
+                return jsonify({"error": "Неверная позиция"}), 400
+
+            # SQL-запрос для вставки данных
+            insert_query = f"""
+            INSERT INTO {table} (name, inn, pidstava, address, iban, bank_account_detail, name_short)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+
+            # Вставка данных в базу
+            try:
+                await self.local_db.execute_query(insert_query,
+                                                  (name, inn, pidstava, address, iban, bank_account_detail, name_short))
+                return jsonify({"message": "Данные успешно добавлены"}), 200
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
 
         @self.app.route('/')
         @self.app.route('/index')

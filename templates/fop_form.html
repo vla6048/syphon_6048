@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Форма ФОП</title>
+</head>
+<body>
+    <h1>Внесение информации о ФОП</h1>
+    <form action="/submit-fop" method="POST">
+        <label for="position">Позиция:</label>
+        <select name="position" id="position">
+            <option value="Мастер">Мастер</option>
+            <option value="Инженер">Инженер</option>
+        </select>
+        <br>
+
+        <label for="name">Полное имя (ФИО):</label>
+        <input type="text" id="name" name="name" required>
+        <br>
+
+        <label for="inn">ИНН:</label>
+        <input type="text" id="inn" name="inn" required>
+        <br>
+
+        <label for="pidstava">Основание:</label>
+        <input type="text" id="pidstava" name="pidstava" required>
+        <br>
+
+        <label for="address">Адрес регистрации:</label>
+        <input type="text" id="address" name="address" required>
+        <br>
+
+        <label for="iban">IBAN:</label>
+        <input type="text" id="iban" name="iban" required>
+        <br>
+
+        <label for="bank_account_detail">Детали банка:</label>
+        <input type="text" id="bank_account_detail" name="bank_account_detail" required>
+        <br>
+
+        <label for="name_short">Сокращенное имя (ИОФ):</label>
+        <input type="text" id="name_short" name="name_short" required>
+        <br>
+
+        <button type="submit">Отправить</button>
+    </form>
+</body>
+</html>

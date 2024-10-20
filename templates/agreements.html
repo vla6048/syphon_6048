@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agreements</title>
+</head>
+<body>
+    <h1>Список договоров</h1>
+
+    <table border="1">
+        <tr>
+            <th>Название договора</th>
+            <th>Мастер</th>
+            <th>Инженер</th>
+            <th>Действия</th>
+        </tr>
+        {% for agreement in agreements %}
+        <tr>
+            <td>{{ agreement[1] }}</td> <!-- Название договора -->
+            <td>{{ agreement[2] }}</td> <!-- Мастер -->
+            <td>{{ agreement[3] }}</td> <!-- Инженер -->
+            <td>
+                <!-- Кнопка для перехода на страницу с протоколами -->
+                <form action="{{ url_for('protocols', agreement_id=agreement[0]) }}" method="get">
+                    <button type="submit">Протоколы</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
