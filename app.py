@@ -1,15 +1,10 @@
-from numpy.ma.core import trace
 from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file
+from quart_auth import QuartAuth, basic_auth_required
 from docx import Document
 from dotenv import load_dotenv
 import os
 import calendar
-import asyncio
-import matplotlib.pyplot as plt
-import io
 from io import BytesIO
-import base64
-from datetime import datetime
 
 from db_manager import DatabaseManager
 
@@ -21,7 +16,12 @@ class MyApp:
     def __init__(self):
         # Создание экземпляра Quart
         self.app = Quart(__name__)
-
+        QuartAuth(self.app)
+        self.app.secret_key = os.getenv('SECRET_KEY')
+        self.app.config["QUART_AUTH_BASIC_USERNAME"] = os.getenv('BUSERNAME')
+        self.app.config["QUART_AUTH_BASIC_PASSWORD"] = os.getenv('BPASSWD')
+        print(os.getenv('BUSERNAME'))
+        print(os.getenv('BPASSWD'))
 
         # Настройка подключения к базам данных
         self.local_db = DatabaseManager(
@@ -43,7 +43,10 @@ class MyApp:
 
     def setup_routes(self):
 
+
+
         @self.app.route('/protocols/<int:agreement_id>/generate_docx', methods=['GET'])
+        @basic_auth_required()
         async def generate_docx(agreement_id):
             # Получаем информацию по договору и протоколу
             agreement_query = """
@@ -144,6 +147,7 @@ class MyApp:
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
         @self.app.route('/protocols/<int:agreement_id>', methods=['GET', 'POST'])
+        @basic_auth_required()
         async def protocols(agreement_id):
             if request.method == 'POST':
                 # Получение данных из формы
@@ -194,6 +198,7 @@ class MyApp:
             return await render_template('protocols.html', protocols=protocols, agreement=agreement[0], agreement_id=agreement_id)
 
         @self.app.route('/agreements', methods=['GET'])
+        @basic_auth_required()
         async def agreements():
             # SQL-запрос для получения информации о всех договорах
             query = """
@@ -210,6 +215,7 @@ class MyApp:
             return await render_template('agreements.html', agreements=agreements_data)
 
         @self.app.route('/fop-form')
+        @basic_auth_required()
         async def fop_form():
             # Отображение формы для внесения информации о ФОП
             return await render_template('fop_form.html')
@@ -253,12 +259,19 @@ class MyApp:
 
         @self.app.route('/')
         @self.app.route('/index')
+        @basic_auth_required()
         async def index():
+            return await render_template('index.html')
+
+        @self.app.route('/device_report')
+        @basic_auth_required()
+        async def device_report():
             devices_query = "SELECT id, description FROM devices WHERE device_type = 'power_control';"
             devices = await self.local_db.execute_query(devices_query)
-            return await render_template('index.html', devices=devices)
+            return await render_template('dev-report.html', devices=devices)
 
         @self.app.route('/generate-report', methods=['GET'])
+        @basic_auth_required()
         async def generate_report():
             start_date = request.args.get('start_date')
             end_date = request.args.get('end_date')
@@ -388,7 +401,7 @@ class MyApp:
 
             # Вставка данных в локальную базу данных
             insert_query = """
-            INSERT IGNORE INTO ntst_pinger_hosts_log (id, ip, start, stop, downtime)
+            INSERT IGNORE INTO dbsyphon.ntst_pinger_hosts_log (id, ip, start, stop, downtime)
             VALUES (%s, %s, %s, %s, TIMESTAMPDIFF(SECOND, %s, %s))
             """
 

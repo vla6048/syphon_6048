@@ -61,7 +61,7 @@ async def load_user(user_id):
 async def index():
     devices_query = "SELECT id, description FROM devices WHERE device_type = 'power_control';"
     devices = await local_db.execute_query(devices_query)
-    return await render_template('index.html', devices=devices)
+    return await render_template('dev-report.html', devices=devices)
 
 
 # Маршрут для логина
