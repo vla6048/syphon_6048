@@ -1,10 +1,13 @@
-from quart import Quart, render_template, request, jsonify,redirect, url_for
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
+from numpy.ma.core import trace
+from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file
+from docx import Document
 from dotenv import load_dotenv
 import os
+import calendar
 import asyncio
 import matplotlib.pyplot as plt
 import io
+from io import BytesIO
 import base64
 from datetime import datetime
 
@@ -40,6 +43,106 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/protocols/<int:agreement_id>/generate_docx', methods=['GET'])
+        async def generate_docx(agreement_id):
+            # Получаем информацию по договору и протоколу
+            agreement_query = """
+            SELECT a.agreement_name, a.agreement_date, f.name AS fop_name, f.inn AS inn_fop, f.pidstava AS pidstava_fop, 
+                   f.address AS fop_address, f.iban AS fop_iban, f.bank_account_detail AS bank_account_detail_fop, f.name_short AS fop_name_short,
+                   r.name AS ri_name, r.inn AS inn_ri, r.pidstava AS pidstava_ri, r.address AS ri_address, r.iban AS ri_iban, r.bank_account_detail AS bank_account_detail_ri, r.name_short AS ri_name_short
+            FROM credentials.agreements AS a
+            JOIN credentials.fop_credentials AS f ON a.master_id = f.id
+            JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
+            WHERE a.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+            agreement = agreement_data[0]  # Мы получаем первый элемент, чтобы передать данные как строку, а не кортеж.
+
+            protocol_query = """
+            SELECT proto_date, proto_sum, proto_sum_caps
+            FROM credentials.protocols
+            WHERE agreement = %s;
+            """
+            protocol_data = await self.local_db.execute_query(protocol_query, (agreement_id,))
+            protocol = protocol_data[0]  # Тоже получаем первый элемент из протоколов
+
+            if not agreement_data or not protocol_data:
+                return "Договор или протокол не найден", 404
+
+            # Преобразуем данные и форматируем дату
+            def format_date(date):
+                months_ukr = {
+                    1: 'січня', 2: 'лютого', 3: 'березня', 4: 'квітня', 5: 'травня', 6: 'червня',
+                    7: 'липня', 8: 'серпня', 9: 'вересня', 10: 'жовтня', 11: 'листопада', 12: 'грудня'
+                }
+                day = date.strftime("%d")
+                month = months_ukr[date.month]
+                year = date.strftime("%Y")
+                return f"{day} {month} {year} року", month, year, day
+
+            agreement_date_str, month_ukr_name, year, _ = format_date(agreement[1])
+            proto_date_str, proto_month_ukr_name, proto_year, last_day_of_the_month  = format_date(protocol[0])
+            template_month = calendar.monthrange(int(protocol[0].strftime("%Y")), int(protocol[0].month))
+            last_day_of_the_month = str(template_month[1])
+
+            # Загрузка шаблона
+            template_path = 'templates/documents/M-RI_protocol.docx'
+            doc = Document(template_path)
+
+            # Замена маркеров
+            replacements = {
+                '@agr_num': agreement[0],
+                '@agr_date': agreement_date_str,
+                '@proto_date': proto_date_str,
+                '@fop_name': agreement[2],
+                '@inn_fop': agreement[3],
+                '@pidstava_fop': agreement[4],
+                '@ri_name': agreement[9],
+                '@inn_ri': agreement[10],
+                '@pidstava_ri': agreement[11],
+                '@month_ukr_name': proto_month_ukr_name,
+                '@year': proto_year,
+                '@last_day_of_the_month': last_day_of_the_month,
+                '@agr_sum': f"{protocol[1]:,.2f}",
+                '@agrsum_handwriting_sample': protocol[2],
+                '@fop_address': agreement[5],
+                '@fop_iban': agreement[6],
+                '@bank_account_detail_fop': agreement[7],
+                '@fopname_short': agreement[8],
+                '@ri_address': agreement[12],
+                '@ri_iban': agreement[13],
+                '@bank_account_detail_ri': agreement[14],
+                '@riname_short': agreement[15]
+            }
+
+            # Замена текста в шаблоне
+            for paragraph in doc.paragraphs:
+                for key, value in replacements.items():
+                    if key in paragraph.text:
+                        paragraph.text = paragraph.text.replace(key, str(value))
+
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for tablee in cell.tables:
+                            for roww in tablee.rows:
+                                for celll in roww.cells:
+                                    for key, value in replacements.items():
+                                        if key in celll.text:
+                                            celll.text = celll.text.replace(key, str(value))
+
+
+            # Сохранение документа в память
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
+
+            # Формируем название файла
+            file_name = f"{agreement[0]}_протокол_{proto_month_ukr_name}_{proto_year}.docx"
+
+            # Отправка документа клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
+
         @self.app.route('/protocols/<int:agreement_id>', methods=['GET', 'POST'])
         async def protocols(agreement_id):
             if request.method == 'POST':
@@ -55,7 +158,7 @@ class MyApp:
                 """
                 await self.local_db.execute_query(insert_query, (agreement_id, proto_date, proto_sum, proto_sum_caps))
 
-                # Перезагрузка страницы после добавления данных без редиректа
+                # Перезагрузка страницы после добавления данных
                 return redirect(url_for('protocols', agreement_id=agreement_id))
 
             # Запрос существующих протоколов по договору
@@ -66,9 +169,18 @@ class MyApp:
             """
             protocols = await self.local_db.execute_query(protocols_query, (agreement_id,))
 
+            # Преобразование кортежей в словари
+            protocols = [
+                {
+                    'proto_date': protocol[0],
+                    'proto_sum': protocol[1],
+                    'proto_sum_caps': protocol[2]
+                } for protocol in protocols
+            ]
+
             # Запрос данных о договоре
             agreement_query = """
-            SELECT a.agreement_name, f.name AS master_name, r.name AS ri_name
+            SELECT a.agreement_name, f.name AS master_name, r.name, a.id AS ri_name
             FROM credentials.agreements AS a
             JOIN credentials.fop_credentials AS f ON a.master_id = f.id
             JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
@@ -76,11 +188,10 @@ class MyApp:
             """
             agreement = await self.local_db.execute_query(agreement_query, (agreement_id,))
 
-            # Проверка на наличие договора
             if not agreement:
                 return "Договор не найден", 404  # Или можно сделать редирект на другую страницу
-
-            return await render_template('protocols.html', protocols=protocols, agreement=agreement[0])
+            print("Agreement id:", agreement_id)
+            return await render_template('protocols.html', protocols=protocols, agreement=agreement[0], agreement_id=agreement_id)
 
         @self.app.route('/agreements', methods=['GET'])
         async def agreements():

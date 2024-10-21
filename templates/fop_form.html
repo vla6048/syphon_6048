@@ -4,46 +4,80 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Форма ФОП</title>
+    <!-- Добавляем ссылку на Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 20px;
+        }
+        .container {
+            max-width: 600px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .form-label {
+            font-weight: bold;
+        }
+        .btn {
+            margin-top: 20px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Внесение информации о ФОП</h1>
-    <form action="/submit-fop" method="POST">
-        <label for="position">Позиция:</label>
-        <select name="position" id="position">
-            <option value="Мастер">Мастер</option>
-            <option value="Инженер">Инженер</option>
-        </select>
-        <br>
+    <div class="container">
+        <h1>Внесение информации о ФОП</h1>
+        <form action="/submit-fop" method="POST">
+            <div class="mb-3">
+                <label for="position" class="form-label">Позиция:</label>
+                <select name="position" id="position" class="form-select" required>
+                    <option value="Мастер">Мастер</option>
+                    <option value="Инженер">Инженер</option>
+                </select>
+            </div>
 
-        <label for="name">Полное имя (ФИО):</label>
-        <input type="text" id="name" name="name" required>
-        <br>
+            <div class="mb-3">
+                <label for="name" class="form-label">Полное имя (ФИО):</label>
+                <input type="text" id="name" name="name" class="form-control" required>
+            </div>
 
-        <label for="inn">ИНН:</label>
-        <input type="text" id="inn" name="inn" required>
-        <br>
+            <div class="mb-3">
+                <label for="inn" class="form-label">ИНН:</label>
+                <input type="text" id="inn" name="inn" class="form-control" required>
+            </div>
 
-        <label for="pidstava">Основание:</label>
-        <input type="text" id="pidstava" name="pidstava" required>
-        <br>
+            <div class="mb-3">
+                <label for="pidstava" class="form-label">Основание:</label>
+                <input type="text" id="pidstava" name="pidstava" class="form-control" required>
+            </div>
 
-        <label for="address">Адрес регистрации:</label>
-        <input type="text" id="address" name="address" required>
-        <br>
+            <div class="mb-3">
+                <label for="address" class="form-label">Адрес регистрации:</label>
+                <input type="text" id="address" name="address" class="form-control" required>
+            </div>
 
-        <label for="iban">IBAN:</label>
-        <input type="text" id="iban" name="iban" required>
-        <br>
+            <div class="mb-3">
+                <label for="iban" class="form-label">IBAN:</label>
+                <input type="text" id="iban" name="iban" class="form-control" required>
+            </div>
 
-        <label for="bank_account_detail">Детали банка:</label>
-        <input type="text" id="bank_account_detail" name="bank_account_detail" required>
-        <br>
+            <div class="mb-3">
+                <label for="bank_account_detail" class="form-label">Детали банка:</label>
+                <input type="text" id="bank_account_detail" name="bank_account_detail" class="form-control" required>
+            </div>
 
-        <label for="name_short">Сокращенное имя (ИОФ):</label>
-        <input type="text" id="name_short" name="name_short" required>
-        <br>
+            <div class="mb-3">
+                <label for="name_short" class="form-label">Сокращенное имя (ИОФ):</label>
+                <input type="text" id="name_short" name="name_short" class="form-control" required>
+            </div>
 
-        <button type="submit">Отправить</button>
-    </form>
+            <button type="submit" class="btn btn-primary">Отправить</button>
+        </form>
+    </div>
+
+    <!-- Добавляем Bootstrap JS и Popper.js для интерактивных элементов, если необходимо -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
