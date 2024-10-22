@@ -1,22 +1,22 @@
-# Используйте официальный образ Python в качестве базового
+# Используем базовое изображение с Python
 FROM python:3.10-slim
 
-# Установите необходимые библиотеки
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libffi-dev \
-    libssl-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Установите зависимости вашего приложения
+# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
-COPY requirements.txt .
 
+# Устанавливаем зависимости
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем исходный код приложения
+# Копируем исходный код в контейнер
 COPY . .
 
-# Указываем команду для запуска приложения
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "wsgi:application", "-b", "0.0.0.0:5000"]
+# Указываем переменные среды для Quart
+ENV QUART_APP=app:app
+ENV QUART_ENV=development
+
+# Устанавливаем Hypercorn (ASGI сервер)
+RUN pip install hypercorn
+
+# Указываем команду запуска Hypercorn в режиме ASGI
+CMD ["hypercorn", "--reload", "-b", "0.0.0.0:5000", "app:MyApp"]

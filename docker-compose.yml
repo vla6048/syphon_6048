@@ -1,9 +1,13 @@
-version: '3'
+version: "3.8"
 
 services:
   web:
     build: .
-    ports:
-      - "5000:5000"
+    command: hypercorn --reload -b 0.0.0.0:5000 app:MyApp
     volumes:
-      - .:/app
+      - .:/app  # Монтируем локальные файлы в контейнер
+    ports:
+      - "5000:5000"  # Пробрасываем порт 5000
+    environment:
+      QUART_APP: "app:MyApp"
+      QUART_ENV: "development"
