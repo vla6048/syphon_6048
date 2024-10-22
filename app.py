@@ -39,6 +39,9 @@ class MyApp:
         # Настройка маршрутов
         self.setup_routes()
 
+    async def __call__(self, scope, receive, send):
+        await self.app(scope, receive, send)
+
     def setup_routes(self):
 
 
