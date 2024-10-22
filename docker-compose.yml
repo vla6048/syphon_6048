@@ -9,5 +9,5 @@ services:
     ports:
       - "5000:5000"  # Пробрасываем порт 5000
     environment:
-      QUART_APP: "app:app"
-      QUART_ENV: "myapp:app"
+      QUART_APP: "myapp:app"
+      QUART_ENV: "development"
