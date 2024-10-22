@@ -421,9 +421,10 @@ class MyApp:
         # Запуск приложения на Quart
         self.app.run(debug=True)
 
+app = MyApp()
+asgi_app = app.app
+
 
 
 if __name__ == '__main__':
-    app = MyApp()
-    asgi_app = app.app
-    # app.run()
+    asgi_app.run()

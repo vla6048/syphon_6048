@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Указываем переменные среды для Quart
-ENV QUART_APP=app:app
+ENV QUART_APP=app:asgi_app
 ENV QUART_ENV=development
 
 # Устанавливаем Hypercorn (ASGI сервер)
