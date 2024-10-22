@@ -422,8 +422,5 @@ class MyApp:
 
 if __name__ == '__main__':
     # Создание экземпляра приложения
-    try:
-        app = MyApp()
-        app.run()
-    except Exception as e:
-        pdb.post_mortem()
+    app = MyApp()
+    app.run()
