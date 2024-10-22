@@ -3,7 +3,7 @@ version: "3.8"
 services:
   web:
     build: .
-    command: hypercorn --reload -b 0.0.0.0:5000 app:app
+    command: hypercorn --reload -b 0.0.0.0:5000 myapp:app
     volumes:
       - .:/app  # Монтируем локальные файлы в контейнер
     ports:
