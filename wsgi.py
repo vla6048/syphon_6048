@@ -1,4 +1,4 @@
 from app import MyApp
 
 if __name__ == "__main__":
-    application = MyApp()
+    application = MyApp(__name__)
