@@ -5,9 +5,15 @@ services:
     build: .
     command: hypercorn --reload -b 0.0.0.0:5000 app:asgi_app
     volumes:
-      - .:/app  # Монтируем локальные файлы в контейнер
+      - .:/app
     ports:
-      - "5000:5000"  # Пробрасываем порт 5000
+      - "5000:5000"
     environment:
       QUART_APP: "app:asgi_app"
       QUART_ENV: "development"
+    depends_on:
+      - mysql_db
+
+  mysql_db:
+    external:
+      name: mysql_container
