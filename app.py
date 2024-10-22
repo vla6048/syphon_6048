@@ -424,5 +424,6 @@ class MyApp:
 
 
 if __name__ == '__main__':
-    application = MyApp()
-    application.run()
+    app = MyApp()
+    asgi_app = app.app
+    # app.run()
