@@ -5,16 +5,15 @@ from dotenv import load_dotenv
 import os
 import calendar
 from io import BytesIO
-
+import pdb
 from db_manager import DatabaseManager
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
 
 
-class MyApp(Quart):
+class MyApp:
     def __init__(self):
-        super().__init__()
         # Создание экземпляра Quart
         self.app = Quart(__name__)
         QuartAuth(self.app)
@@ -423,5 +422,8 @@ class MyApp(Quart):
 
 if __name__ == '__main__':
     # Создание экземпляра приложения
-    my_app = MyApp()
-    my_app.run()
+    try:
+        app = MyApp()
+        app.run()
+    except Exception as e:
+        pdb.post_mortem()
