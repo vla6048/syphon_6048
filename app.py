@@ -12,7 +12,7 @@ from db_manager import DatabaseManager
 load_dotenv()
 
 
-class MyApp:
+class MyApp(Quart):
     def __init__(self, import_name):
         super().__init__(import_name)
         # Создание экземпляра Quart
