@@ -3,8 +3,6 @@ version: "3.8"
 services:
   web:
     build: .
-    networks:
-      - syphon_network
     command: hypercorn --reload -b 0.0.0.0:5000 app:asgi_app
     volumes:
       - .:/app
