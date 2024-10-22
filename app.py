@@ -418,8 +418,8 @@ class MyApp:
         # Запуск приложения на Quart
         self.app.run(debug=True)
 
-application = MyApp()
+
 
 if __name__ == '__main__':
-    # Создание экземпляра приложения
+    application = MyApp()
     application.run()
