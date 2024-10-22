@@ -19,4 +19,4 @@ ENV QUART_ENV=development
 RUN pip install hypercorn
 
 # Указываем команду запуска Hypercorn в режиме ASGI
-CMD ["hypercorn", "--reload", "-b", "0.0.0.0:5000", "app:my_app"]
+CMD ["hypercorn", "--reload", "-b", "0.0.0.0:5000", "app:MyApp"]
