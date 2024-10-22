@@ -19,4 +19,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Указываем команду для запуска приложения
-CMD ["uvicorn", "wsgi:application", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "wsgi:application", "-b", "0.0.0.0:5000"]

@@ -20,8 +20,6 @@ class MyApp:
         self.app.secret_key = os.getenv('SECRET_KEY')
         self.app.config["QUART_AUTH_BASIC_USERNAME"] = os.getenv('BUSERNAME')
         self.app.config["QUART_AUTH_BASIC_PASSWORD"] = os.getenv('BPASSWD')
-        print(os.getenv('BUSERNAME'))
-        print(os.getenv('BPASSWD'))
 
         # Настройка подключения к базам данных
         self.local_db = DatabaseManager(
