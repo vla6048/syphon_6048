@@ -12,9 +12,8 @@ from db_manager import DatabaseManager
 load_dotenv()
 
 
-class MyApp(Quart):
-    def __init__(self, import_name):
-        super().__init__(import_name)
+class MyApp:
+    def __init__(self):
         # Создание экземпляра Quart
         self.app = Quart(__name__)
         QuartAuth(self.app)
