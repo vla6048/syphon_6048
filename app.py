@@ -422,5 +422,5 @@ class MyApp:
 
 if __name__ == '__main__':
     # Создание экземпляра приложения
-    app = MyApp()
-    app.run()
+    application = MyApp()
+    application.run()
