@@ -425,5 +425,4 @@ if __name__ == '__main__':
     my_app = MyApp()
 
     # Запуск приложения
-    app = my_app.app
-    app.run()
+    my_app.run()
