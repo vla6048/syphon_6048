@@ -209,11 +209,43 @@ class MyApp:
             JOIN credentials.ri_credentials rc ON a.ri_id = rc.id;
             """
 
-            # Выполняем запрос и получаем данные
+            # Выполняем запрос и получаем данные по договорам
             agreements_data = await self.local_db.execute_query(query)
 
-            # Передаем данные в шаблон
-            return await render_template('agreements.html', agreements=agreements_data)
+            all_years = set()
+            agreements_list = []
+
+            # Преобразуем каждый кортеж в словарь
+            for agreement in agreements_data:
+                agreement_dict = {
+                    'id': agreement[0],
+                    'agreement_name': agreement[1],
+                    'master_name': agreement[2],
+                    'engineer_name': agreement[3],
+                    'protocols_by_year': {}
+                }
+
+                # Для каждого договора получаем данные по протоколам
+                proto_query = """
+                SELECT YEAR(proto_date) AS proto_year, MONTH(proto_date) AS proto_month
+                FROM credentials.protocols
+                WHERE agreement = %s
+                ORDER BY proto_year, proto_month;
+                """
+                proto_data = await self.local_db.execute_query(proto_query, (agreement[0],))
+
+                # Сортируем протоколы по годам
+                for row in proto_data:
+                    year, month = row
+                    if year not in agreement_dict['protocols_by_year']:
+                        agreement_dict['protocols_by_year'][year] = []
+                    agreement_dict['protocols_by_year'][year].append(month)
+                    all_years.add(year)
+
+                agreements_list.append(agreement_dict)
+
+            # Передаем все данные в шаблон, включая все уникальные годы
+            return await render_template('agreements.html', agreements=agreements_list, all_years=sorted(all_years))
 
         @self.app.route('/fop-form')
         @basic_auth_required()

@@ -14,18 +14,38 @@
                     <th>Название договора</th>
                     <th>Мастер</th>
                     <th>Инженер</th>
+
+                    <!-- Столбцы для каждого года -->
+                    {% for year in all_years %}
+                        <th>Протоколы за месяцы, {{ year }}</th>
+                    {% endfor %}
+
                     <th>Действия</th>
                 </tr>
             </thead>
             <tbody>
                 {% for agreement in agreements %}
                 <tr>
-                    <td>{{ agreement[1] }}</td> <!-- Название договора -->
-                    <td>{{ agreement[2] }}</td> <!-- Мастер -->
-                    <td>{{ agreement[3] }}</td> <!-- Инженер -->
+                    <td>{{ agreement.agreement_name }}</td> <!-- Название договора -->
+                    <td>{{ agreement.master_name }}</td> <!-- Мастер -->
+                    <td>{{ agreement.engineer_name }}</td> <!-- Инженер -->
+
+                    <!-- Данные по протоколам для каждого года -->
+                    {% for year in all_years %}
+                        <td>
+                            {% if year in agreement.protocols_by_year %}
+                                {% for month in agreement.protocols_by_year[year] %}
+                                    {{ month }} <!-- Месяцы, за которые есть протоколы -->
+                                {% endfor %}
+                            {% else %}
+                                Нет протоколов
+                            {% endif %}
+                        </td>
+                    {% endfor %}
+
                     <td>
                         <!-- Кнопка для перехода на страницу с протоколами -->
-                        <form action="{{ url_for('protocols', agreement_id=agreement[0]) }}" method="get" class="d-inline">
+                        <form action="{{ url_for('protocols', agreement_id=agreement.id) }}" method="get" class="d-inline">
                             <button type="submit" class="btn btn-primary btn-sm">Протоколы</button>
                         </form>
                     </td>
