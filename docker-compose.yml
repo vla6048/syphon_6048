@@ -4,6 +4,8 @@ services:
   web:
     build: .
     command: hypercorn --reload -b 0.0.0.0:5000 app:asgi_app
+    networks:
+      - syphon_network
     volumes:
       - .:/app
     ports:
