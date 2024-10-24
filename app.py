@@ -90,7 +90,7 @@ class MyApp:
             last_day_of_the_month = str(template_month[1])
 
             # Загрузка шаблона
-            template_path = 'templates/documents/M-RI_protocol.docx'
+            template_path = 'static/docs/M-RI_protocol.docx'
             doc = Document(template_path)
 
             # Замена маркеров
