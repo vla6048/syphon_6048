@@ -1,24 +1,26 @@
 import aiomysql
-import asyncio
+import pymysql
 
 class DatabaseManager:
-    def __init__(self, host, user, password, db):
+    def __init__(self, host, user, password, db, pool_recycle=3600):
         self.host = host
         self.user = user
         self.password = password
         self.db = db
+        self.pool_recycle = pool_recycle
         self.connection = None
 
     async def connect(self):
         """
-        Подключение к базе данных.
+        Подключение к базе данных с использованием параметра pool_recycle.
         """
         try:
             self.connection = await aiomysql.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
-                db=self.db
+                db=self.db,
+                autocommit=True  # это обеспечит автоматическое выполнение commit
             )
             print(f"Успешное подключение к базе данных {self.db} на {self.host}.")
         except aiomysql.Error as e:
@@ -32,18 +34,26 @@ class DatabaseManager:
             self.connection.close()
             print(f"Соединение с базой данных {self.db} закрыто.")
 
+    async def ensure_connection(self):
+        """
+        Убедитесь, что соединение активно, иначе переподключитесь.
+        """
+        try:
+            if not self.connection or self.connection.close:
+                await self.connect()
+        except pymysql.err.InterfaceError:
+            await self.connect()
+
     async def execute_query(self, query, params=None):
         """
-        Выполнение SQL запроса и возврат результата.
+        Выполнение SQL запроса и возврат результата с проверкой состояния соединения.
         """
-        if not self.connection:
-            await self.connect()
+        await self.ensure_connection()  # Проверяем соединение перед выполнением запроса
         if self.connection:
             async with self.connection.cursor() as cursor:
                 try:
                     await cursor.execute(query, params)
                     result = await cursor.fetchall()
-                    await self.connection.commit()
                     return result
                 except aiomysql.Error as e:
                     print(f"Ошибка выполнения запроса: {e}")
