@@ -13,3 +13,6 @@ services:
     environment:
       QUART_APP: "app:asgi_app"
       QUART_ENV: "development"
+networks:
+  syphon_network:
+    external: true
