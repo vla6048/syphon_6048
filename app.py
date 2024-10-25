@@ -166,26 +166,33 @@ class MyApp:
                 # Перезагрузка страницы после добавления данных
                 return redirect(url_for('protocols', agreement_id=agreement_id))
 
-            # Запрос существующих протоколов по договору
+            # Запрос существующих протоколов с proto_state = 1
             protocols_query = """
-            SELECT p.proto_date, p.proto_sum, p.proto_sum_caps
+            SELECT p.proto_date, p.proto_sum, p.proto_sum_caps, p.proto_state, p.id
             FROM credentials.protocols AS p
-            WHERE p.agreement = %s;
+            WHERE p.agreement = %s AND p.proto_state = 1;
             """
-            protocols = await self.local_db.execute_query(protocols_query, (agreement_id,))
+            protocols_data = await self.local_db.execute_query(protocols_query, (agreement_id,))
+
+            # Проверка на пустой результат запроса
+            if protocols_data is None:
+                protocols_data = []
 
             # Преобразование кортежей в словари
             protocols = [
                 {
                     'proto_date': protocol[0],
                     'proto_sum': protocol[1],
-                    'proto_sum_caps': protocol[2]
-                } for protocol in protocols
+                    'proto_sum_caps': protocol[2],
+                    'proto_state': protocol[3],
+                    'id': protocol[4]
+                }
+                for protocol in protocols_data
             ]
 
             # Запрос данных о договоре
             agreement_query = """
-            SELECT a.agreement_name, f.name AS master_name, r.name, a.id AS ri_name
+            SELECT a.agreement_name, f.name AS master_name, r.name AS ri_name, a.id
             FROM credentials.agreements AS a
             JOIN credentials.fop_credentials AS f ON a.master_id = f.id
             JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
@@ -195,8 +202,23 @@ class MyApp:
 
             if not agreement:
                 return "Договор не найден", 404  # Или можно сделать редирект на другую страницу
-            print("Agreement id:", agreement_id)
-            return await render_template('protocols.html', protocols=protocols, agreement=agreement[0], agreement_id=agreement_id)
+
+            # Отображение страницы протоколов
+            return await render_template('protocols.html', protocols=protocols, agreement=agreement[0],
+                                         agreement_id=agreement_id)
+
+        @self.app.route('/protocols/<int:agreement_id>/delete/<int:protocol_id>', methods=['POST'])
+        @basic_auth_required()
+        async def delete_protocol(agreement_id, protocol_id):
+            update_query = """
+            UPDATE credentials.protocols 
+            SET proto_state = 0 
+            WHERE id = %s
+            """
+            await self.local_db.execute_query(update_query, (protocol_id,))
+
+            # Перезагрузка страницы после удаления
+            return redirect(url_for('protocols', agreement_id=agreement_id))
 
         @self.app.route('/agreements', methods=['GET'])
         @basic_auth_required()
@@ -229,7 +251,7 @@ class MyApp:
                 proto_query = """
                 SELECT YEAR(proto_date) AS proto_year, MONTH(proto_date) AS proto_month
                 FROM credentials.protocols
-                WHERE agreement = %s
+                WHERE proto_state = 1 AND agreement = %s
                 ORDER BY proto_year, proto_month;
                 """
                 proto_data = await self.local_db.execute_query(proto_query, (agreement[0],))
