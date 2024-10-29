@@ -48,7 +48,7 @@
                         <td>{{ protocol.proto_date.strftime('%B %Y') }}</td>
                         <td>{{ protocol.proto_sum }}</td>
                         <td>{{ protocol.proto_sum_caps }}</td>
-                        <td><button class="btn btn-secondary" disabled>АКТ</button></td>
+                        <td><a href="{{ url_for('generate_act_docx', agreement_id=agreement_id) }}" class="btn btn-primary">АКТ DOCX</a></td>
                         <td><a href="{{ url_for('generate_docx', agreement_id=agreement_id) }}" class="btn btn-primary">Протокол DOCX</a></td>
                         <td>
                             <!-- Кнопка для удаления протокола -->
