@@ -43,13 +43,40 @@ class MyApp:
     async def __call__(self, scope, receive, send):
         await self.app(scope, receive, send)
 
+    #функции для роутов
+    def replace_text_in_document(self, doc, replacements):
+        for paragraph in doc.paragraphs:
+            for key, value in replacements.items():
+                if key in paragraph.text:
+                    paragraph.text = paragraph.text.replace(key, str(value))
+
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for tablee in cell.tables:
+                        for roww in tablee.rows:
+                            for celll in roww.cells:
+                                for key, value in replacements.items():
+                                    if key in celll.text:
+                                        celll.text = celll.text.replace(key, str(value))
+
+    def format_date(self, date):
+        months_ukr = {
+            1: 'січня', 2: 'лютого', 3: 'березня', 4: 'квітня', 5: 'травня', 6: 'червня',
+            7: 'липня', 8: 'серпня', 9: 'вересня', 10: 'жовтня', 11: 'листопада', 12: 'грудня'
+        }
+        day = date.strftime("%d")
+        month = months_ukr[date.month]
+        year = date.strftime("%Y")
+        return f"{day} {month} {year} року", month, year, day
+
     def setup_routes(self):
 
 
 
-        @self.app.route('/protocols/<int:agreement_id>/generate_docx', methods=['GET'])
+        @self.app.route('/protocols/<int:agreement_id>/generate_docx/<int:protocol_id>', methods=['GET'])
         @basic_auth_required()
-        async def generate_docx(agreement_id):
+        async def generate_docx(agreement_id,protocol_id):
             # Получаем информацию по договору и протоколу
             agreement_query = """
             SELECT a.agreement_name, a.agreement_date, f.name AS fop_name, f.inn AS inn_fop, f.pidstava AS pidstava_fop, 
@@ -64,29 +91,19 @@ class MyApp:
             agreement = agreement_data[0]  # Мы получаем первый элемент, чтобы передать данные как строку, а не кортеж.
 
             protocol_query = """
-            SELECT proto_date, proto_sum, proto_sum_caps
-            FROM credentials.protocols
-            WHERE agreement = %s;
-            """
-            protocol_data = await self.local_db.execute_query(protocol_query, (agreement_id,))
+                        SELECT proto_date, proto_sum, proto_sum_caps
+                        FROM credentials.protocols
+                        WHERE agreement = %s and id = %s;
+                        """
+            protocol_data = await self.local_db.execute_query(protocol_query, (agreement_id, protocol_id))
             protocol = protocol_data[0]  # Тоже получаем первый элемент из протоколов
 
             if not agreement_data or not protocol_data:
                 return "Договор или протокол не найден", 404
 
             # Преобразуем данные и форматируем дату
-            def format_date(date):
-                months_ukr = {
-                    1: 'січня', 2: 'лютого', 3: 'березня', 4: 'квітня', 5: 'травня', 6: 'червня',
-                    7: 'липня', 8: 'серпня', 9: 'вересня', 10: 'жовтня', 11: 'листопада', 12: 'грудня'
-                }
-                day = date.strftime("%d")
-                month = months_ukr[date.month]
-                year = date.strftime("%Y")
-                return f"{day} {month} {year} року", month, year, day
-
-            agreement_date_str, month_ukr_name, year, _ = format_date(agreement[1])
-            proto_date_str, proto_month_ukr_name, proto_year, last_day_of_the_month  = format_date(protocol[0])
+            agreement_date_str, month_ukr_name, year, _ = self.format_date(agreement[1])
+            proto_date_str, proto_month_ukr_name, proto_year, last_day_of_the_month  = self.format_date(protocol[0])
             template_month = calendar.monthrange(int(protocol[0].strftime("%Y")), int(protocol[0].month))
             last_day_of_the_month = str(template_month[1])
 
@@ -122,21 +139,7 @@ class MyApp:
 
 
             # Замена текста в шаблоне
-            for paragraph in doc.paragraphs:
-                for key, value in replacements.items():
-                    if key in paragraph.text:
-                        paragraph.text = paragraph.text.replace(key, str(value))
-
-
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for tablee in cell.tables:
-                            for roww in tablee.rows:
-                                for celll in roww.cells:
-                                    for key, value in replacements.items():
-                                        if key in celll.text:
-                                            celll.text = celll.text.replace(key, str(value))
+            self.replace_text_in_document(doc, replacements)
 
 
             # Сохранение документа в память
@@ -150,9 +153,9 @@ class MyApp:
             # Отправка документа клиенту
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
-        @self.app.route('/protocols/<int:agreement_id>/generate_act_docx', methods=['GET'])
+        @self.app.route('/protocols/<int:agreement_id>/generate_act_docx/<int:protocol_id>', methods=['GET'])
         @basic_auth_required()
-        async def generate_act_docx(agreement_id):
+        async def generate_act_docx(agreement_id,protocol_id):
             # Получаем информацию по договору и протоколу
             agreement_query = """
             SELECT a.agreement_name, a.agreement_date, f.name AS fop_name, f.inn AS inn_fop, f.pidstava AS pidstava_fop, 
@@ -169,27 +172,18 @@ class MyApp:
             protocol_query = """
             SELECT proto_date, proto_sum, proto_sum_caps
             FROM credentials.protocols
-            WHERE agreement = %s;
+            WHERE agreement = %s and id = %s;
             """
-            protocol_data = await self.local_db.execute_query(protocol_query, (agreement_id,))
+            protocol_data = await self.local_db.execute_query(protocol_query, (agreement_id,protocol_id))
+            print(protocol_data)
             protocol = protocol_data[0]  # Тоже получаем первый элемент из протоколов
 
             if not agreement_data or not protocol_data:
                 return "Договор или протокол не найден", 404
 
             # Преобразуем данные и форматируем дату
-            def format_date(date):
-                months_ukr = {
-                    1: 'січня', 2: 'лютого', 3: 'березня', 4: 'квітня', 5: 'травня', 6: 'червня',
-                    7: 'липня', 8: 'серпня', 9: 'вересня', 10: 'жовтня', 11: 'листопада', 12: 'грудня'
-                }
-                day = date.strftime("%d")
-                month = months_ukr[date.month]
-                year = date.strftime("%Y")
-                return f"{day} {month} {year} року", month, year, day
-
-            agreement_date_str, month_ukr_name, year, _ = format_date(agreement[1])
-            proto_date_str, proto_month_ukr_name, proto_year, last_day_of_the_month  = format_date(protocol[0])
+            agreement_date_str, month_ukr_name, year, _ = self.format_date(agreement[1])
+            proto_date_str, proto_month_ukr_name, proto_year, last_day_of_the_month = self.format_date(protocol[0])
             template_month = calendar.monthrange(int(protocol[0].strftime("%Y")), int(protocol[0].month))
             last_day_of_the_month = str(template_month[1])
 
@@ -221,24 +215,12 @@ class MyApp:
                 '@ri_iban': agreement[13],
                 '@bank_account_detail_ri': agreement[14],
                 '@riname_short': agreement[15],
-                '@today': format_date(date.today())[0]
+                '@today': self.format_date(date.today())[0],
+                '@act_nubmer': f'{protocol_id}/{agreement[0]}'
             }
 
             # Замена текста в шаблоне
-            for paragraph in doc.paragraphs:
-                for key, value in replacements.items():
-                    if key in paragraph.text:
-                        paragraph.text = paragraph.text.replace(key, str(value))
-
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for tablee in cell.tables:
-                            for roww in tablee.rows:
-                                for celll in roww.cells:
-                                    for key, value in replacements.items():
-                                        if key in celll.text:
-                                            celll.text = celll.text.replace(key, str(value))
+            self.replace_text_in_document(doc, replacements)
 
             # Сохранение документа в память
             doc_io = BytesIO()
