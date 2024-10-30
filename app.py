@@ -45,20 +45,22 @@ class MyApp:
 
     #функции для роутов
     def replace_text_in_document(self, doc, replacements):
+        # Заміна у всіх параграфах документа
         for paragraph in doc.paragraphs:
             for key, value in replacements.items():
                 if key in paragraph.text:
                     paragraph.text = paragraph.text.replace(key, str(value))
 
-        for table in doc.tables:
+    def replace_in_tables(self, tables, replacements):
+        for table in tables:
             for row in table.rows:
                 for cell in row.cells:
-                    for tablee in cell.tables:
-                        for roww in tablee.rows:
-                            for celll in roww.cells:
-                                for key, value in replacements.items():
-                                    if key in celll.text:
-                                        celll.text = celll.text.replace(key, str(value))
+                    for key, value in replacements.items():
+                        if key in cell.text:
+                            cell.text = cell.text.replace(key, str(value))
+                    # Перевірка на вкладені таблиці та рекурсивний виклик
+                    if cell.tables:
+                        self.replace_in_tables(cell.tables, replacements)
 
     def format_date(self, date):
         months_ukr = {
@@ -69,6 +71,12 @@ class MyApp:
         month = months_ukr[date.month]
         year = date.strftime("%Y")
         return f"{day} {month} {year} року", month, year, day
+
+    def amount_to_time(self, protocol_amount):
+        work_hours = protocol_amount/1000
+        hours = int(work_hours)
+        minutes = int((work_hours-hours)*60)
+        return f"{hours} годин {minutes} хвилин"
 
     def setup_routes(self):
 
@@ -140,6 +148,7 @@ class MyApp:
 
             # Замена текста в шаблоне
             self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
 
 
             # Сохранение документа в память
@@ -175,7 +184,6 @@ class MyApp:
             WHERE agreement = %s and id = %s;
             """
             protocol_data = await self.local_db.execute_query(protocol_query, (agreement_id,protocol_id))
-            print(protocol_data)
             protocol = protocol_data[0]  # Тоже получаем первый элемент из протоколов
 
             if not agreement_data or not protocol_data:
@@ -216,11 +224,15 @@ class MyApp:
                 '@bank_account_detail_ri': agreement[14],
                 '@riname_short': agreement[15],
                 '@today': self.format_date(date.today())[0],
-                '@act_nubmer': f'{protocol_id}/{agreement[0]}'
+                '@act_nubmer': f'{protocol_id}/{agreement[0]}',
+                '@act_hours': self.amount_to_time(float(protocol[1]))
             }
 
             # Замена текста в шаблоне
+            print(self.amount_to_time(float(protocol[1])))
             self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
+
 
             # Сохранение документа в память
             doc_io = BytesIO()
