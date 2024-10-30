@@ -387,6 +387,7 @@ class MyApp:
             iban = form_data.get('iban')
             bank_account_detail = form_data.get('bank_account_detail')
             name_short = form_data.get('name_short')
+            email = form_data.get('email')
 
             # Выбор таблицы в зависимости от позиции
             if position == 'Мастер':
@@ -398,14 +399,14 @@ class MyApp:
 
             # SQL-запрос для вставки данных
             insert_query = f"""
-            INSERT INTO {table} (name, inn, pidstava, address, iban, bank_account_detail, name_short)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO {table} (name, inn, pidstava, address, iban, bank_account_detail, name_short, email)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             # Вставка данных в базу
             try:
                 await self.local_db.execute_query(insert_query,
-                                                  (name, inn, pidstava, address, iban, bank_account_detail, name_short))
+                                                  (name, inn, pidstava, address, iban, bank_account_detail, name_short, email))
                 return jsonify({"message": "Данные успешно добавлены"}), 200
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
