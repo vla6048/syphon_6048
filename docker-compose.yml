@@ -4,6 +4,7 @@ services:
   web:
     build: .
     command: hypercorn --reload -b 0.0.0.0:5000 app:asgi_app
+    restart: always
     networks:
       - syphon_network
     volumes:
