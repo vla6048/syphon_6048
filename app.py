@@ -2,6 +2,7 @@ from quart import Quart, render_template, request, jsonify,redirect, url_for, se
 from quart_auth import QuartAuth, basic_auth_required
 from docx import Document
 from dotenv import load_dotenv
+from num2words import num2words
 from datetime import date
 import os
 import calendar
@@ -61,6 +62,13 @@ class MyApp:
                     # Перевірка на вкладені таблиці та рекурсивний виклик
                     if cell.tables:
                         self.replace_in_tables(cell.tables, replacements)
+
+    def convert_to_currency_words(self, amount):
+        hryvnia_part = int(amount)
+        kopiyka_part = int(round((amount - hryvnia_part) * 100))
+        hryvnia_words = num2words(hryvnia_part, lang='uk')
+        kopiyka_words = num2words(kopiyka_part, lang='uk')
+        return f"{hryvnia_words} гривень {kopiyka_words} копійок"
 
     def format_date(self, date):
         months_ukr = {
@@ -252,7 +260,8 @@ class MyApp:
                 # Получение данных из формы
                 proto_date = (await request.form)['proto_date']
                 proto_sum = (await request.form)['proto_sum']
-                proto_sum_caps = (await request.form)['proto_sum_caps']
+                # proto_sum_caps = (await request.form)['proto_sum_caps']
+                proto_sum_caps = self.convert_to_currency_words(float(proto_sum))
 
                 # Вставка данных протокола в базу данных
                 insert_query = """

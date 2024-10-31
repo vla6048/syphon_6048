@@ -1,13 +1,15 @@
-from docx import Document
+from num2words import num2words
 
-template_path = 'static/docs/M-RI_protocol.docx'
-doc = Document(template_path)
+sum = '666.54'
+summa = float(sum)
+print(summa)
 
-for table in doc.tables:
-    for row in table.rows:
-        for cell in row.cells:
-            print(cell.tables)
-            for tablee in cell.tables:
-                for roww in tablee.rows:
-                    for celll in roww.cells:
-                        print(celll.text)
+def convert_to_currency_words(amount):
+    hryvnia_part = int(amount)
+    kopiyka_part = int(round((amount - hryvnia_part) * 100))
+    hryvnia_words = num2words(hryvnia_part, lang='uk')
+    kopiyka_words = num2words(kopiyka_part, lang='uk')
+    return f"{hryvnia_words} гривень {kopiyka_words} копійок"
+
+
+print(convert_to_currency_words(666.54))
