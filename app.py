@@ -1,12 +1,13 @@
-from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file
+from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file, flash
 from quart_auth import QuartAuth, basic_auth_required
 from docx import Document
 from dotenv import load_dotenv
 from num2words import num2words
-from datetime import date
+from datetime import date, datetime
 import os
 import calendar
 from io import BytesIO
+import pandas as pd
 import pdb
 from db_manager import DatabaseManager
 
@@ -19,7 +20,7 @@ class MyApp:
         # Создание экземпляра Quart
         self.app = Quart(__name__)
         QuartAuth(self.app)
-        self.app.secret_key = os.getenv('SECRET_KEY')
+        self.app.secret_key = os.urandom(24)
         self.app.config["QUART_AUTH_BASIC_USERNAME"] = os.getenv('BUSERNAME')
         self.app.config["QUART_AUTH_BASIC_PASSWORD"] = os.getenv('BPASSWD')
 
@@ -88,6 +89,81 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/generate_protocols', methods=['POST'])
+        async def generate_protocols():
+            protocol_date = request.args.get('protocol_date')
+
+            if protocol_date:
+                # Ваша логика генерации протоколов по `protocol_date`
+                print(f"Генерация протоколов для даты: {protocol_date}")
+
+            # После генерации вернемся обратно на страницу загрузки
+            return redirect(url_for('estimates_upload'))
+
+        @self.app.route('/estimates_upload', methods=['GET', 'POST'])
+        async def estimates_upload():
+            # Обработка POST запроса для загрузки данных
+            if request.method == 'POST':
+                # Получение данных из формы с использованием await
+                date_str = (await request.form).get('date')
+                file = (await request.files).get('file')
+
+                if not date_str or not file:
+                    await flash("Пожалуйста, укажите дату и выберите файл.")
+                    return redirect(url_for('estimates_upload'))
+
+                # Преобразуем дату в нужный формат
+                try:
+                    date_of_protocol = datetime.strptime(date_str, '%Y-%m-%d').date()
+                except ValueError:
+                    await flash("Некорректный формат даты.")
+                    return redirect(url_for('estimates_upload'))
+
+                # Чтение данных из XLSX
+                df = pd.read_excel(file)
+                insert_query = """
+                    INSERT INTO credentials.soft_estimates (
+                        clientId, description, fop_inn, fop_name, fop_in,
+                        fop_change, fop_expense, fop_out, type_agr, 
+                        ri_inn, ri_name, date_of_protocol
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+
+                # Обработка данных и вставка в базу
+                records = [
+                    (
+                        int(row['ClientId']), str(row['Description']), int(row['OKPO']), str(row['Name']),
+                        float(row['In']), float(row['Charge']), float(row['Expense']),
+                        float(row['Out']), str(row['Type']), int(row['ContractOKPO']),
+                        str(row['ContractName']), date_of_protocol
+                    )
+                    for _, row in df.iterrows()
+                ]
+
+                try:
+                    # Выполнение вставки
+                    await self.local_db.ensure_connection()
+                    for record in records:
+                        await self.local_db.execute_query(insert_query, record)
+                    await flash("Данные успешно загружены.")
+                except Exception as e:
+                    await flash(f"Ошибка при загрузке данных: {e}")
+                    print(f"Ошибка при загрузке данных: {e}")
+                finally:
+                    await self.local_db.close()
+
+                return redirect(url_for('estimates_upload'))
+
+            # Обработка GET запроса для отображения формы и уникальных дат
+            select_dates_query = "SELECT DISTINCT date_of_protocol FROM credentials.soft_estimates"
+            try:
+                await self.local_db.ensure_connection()
+                dates = await self.local_db.execute_query(select_dates_query)
+            except Exception as e:
+                print(f"Ошибка при получении дат: {e}")
+                dates = []
+
+            return await render_template('estimates_upload.html', dates=dates)
 
 
         @self.app.route('/protocols/<int:agreement_id>/generate_docx/<int:protocol_id>', methods=['GET'])

@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+
+{% block title %}Загрузка расчетов Софт{% endblock %}
+
+{% block content %}
+    <div class="container">
+        <h2>Загрузка расчетов Софт</h2>
+        <form action="{{ url_for('estimates_upload') }}" method="POST" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="date" class="form-label">Дата:</label>
+                <input type="date" id="date" name="date" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label for="file" class="form-label">Файл XLSX:</label>
+                <input type="file" id="file" name="file" class="form-control" accept=".xlsx" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="uploadButton" disabled>Загрузить</button>
+        </form>
+    </div>
+
+    <!-- Таблица с уникальными датами и кнопками генерации протоколов -->
+    <div class="container mt-3">
+        <h3>Доступные даты для генерации протоколов</h3>
+
+        {% if dates %}
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Дата протокола</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for date in dates %}
+                        <tr>
+                            <td>{{ date[0].strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <form action="{{ url_for('generate_protocols', protocol_date=date[0].strftime('%Y-%m-%d')) }}" method="POST">
+                                    <button type="submit" class="btn btn-secondary">Сгенерировать протоколы</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="text-muted">Данных для отображения пока нет.</p>
+        {% endif %}
+    </div>
+
+    <script>
+        const dateField = document.getElementById('date');
+        const fileField = document.getElementById('file');
+        const uploadButton = document.getElementById('uploadButton');
+
+        function toggleButton() {
+            uploadButton.disabled = !(dateField.value && fileField.files.length);
+        }
+
+        dateField.addEventListener('input', toggleButton);
+        fileField.addEventListener('change', toggleButton);
+    </script>
+{% endblock %}
