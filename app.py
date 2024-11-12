@@ -220,18 +220,32 @@ class MyApp:
         @basic_auth_required()
         async def generate_protocols():
             try:
-                # Получаем все записи из таблицы soft_estimates
+                # Получаем месяц и год из формы
+                protocol_month = int((await request.form).get('protocol_month'))
+                protocol_year = int((await request.form).get('protocol_year'))
+
+                # Запрос только для записей с указанным месяцем и годом
                 soft_estimates_query = """
-                    SELECT id, clientId, description, fop_inn, fop_name, fop_in, fop_change, fop_expense, fop_out, type_agr, ri_inn, ri_name, date_of_protocol
-                    FROM credentials.soft_estimates;
+                    SELECT id, clientId, description, fop_inn, fop_name, fop_in, fop_change, 
+                           fop_expense, fop_out, type_agr, ri_inn, ri_name, date_of_protocol
+                    FROM credentials.soft_estimates
+                    WHERE MONTH(date_of_protocol) = %s AND YEAR(date_of_protocol) = %s;
                 """
-                soft_estimates = await self.local_db.execute_query(soft_estimates_query)
+
+                # Выполняем запрос
+                soft_estimates = await self.local_db.execute_query(soft_estimates_query,
+                                                                   (protocol_month, protocol_year))
+                print("Количество записей для генерации протоколов:", len(soft_estimates))
+
+                if not soft_estimates:
+                    await flash("Записей для указанного месяца и года не найдено.", "info")
+                    return redirect(url_for('estimates_upload'))
 
                 for record in soft_estimates:
                     (id, clientId, description, fop_inn, fop_name, fop_in, fop_change,
                      fop_expense, fop_out, type_agr, ri_inn, ri_name, date_of_protocol) = record
 
-                    # Ищем соответствующий договор в таблице agreements
+                    # Поиск соответствующего договора
                     agreement_query = """
                         SELECT agreements.id 
                         FROM credentials.agreements AS agreements
@@ -241,17 +255,19 @@ class MyApp:
                     """
                     agreement_result = await self.local_db.execute_query(agreement_query, (fop_inn, ri_inn))
                     agreement = agreement_result[0][0] if agreement_result else None
+                    print("Договор найден:", agreement)
 
                     if agreement:
-                        # Договор найден, вставляем данные в таблицу protocols_test
+                        # Договор найден, вставляем данные в таблицу protocols
                         proto_sum_caps = self.convert_to_currency_words(fop_change)
 
                         insert_protocol_query = """
-                            INSERT INTO credentials.protocols (agreement, proto_date, proto_sum, proto_sum_caps)
+                            INSERT INTO credentials.protocols_test (agreement, proto_date, proto_sum, proto_sum_caps)
                             VALUES (%s, %s, %s, %s);
                         """
                         await self.local_db.execute_query(insert_protocol_query,
                                                           (agreement, date_of_protocol, fop_change, proto_sum_caps))
+                        print(f"Протокол добавлен для договора {agreement} на сумму {fop_change}")
                     else:
                         # Договор не найден, копируем все данные в protocols_missing_agreements
                         insert_missing_agreement_query = """
@@ -262,14 +278,15 @@ class MyApp:
                         """
                         await self.local_db.execute_query(insert_missing_agreement_query,
                                                           (clientId, description, fop_inn, fop_name, fop_in, fop_change,
-                                                           fop_expense,
-                                                           fop_out, type_agr, ri_inn, ri_name, date_of_protocol, False))
+                                                           fop_expense, fop_out, type_agr, ri_inn, ri_name,
+                                                           date_of_protocol, False))
+                        print(
+                            f"Протокол не добавлен, данные сохранены в таблицу protocols_missing_agreements для клиента {clientId}")
 
-                await flash(
-                    "Протоколы успешно сгенерированы и сохранены. Некоторые записи перенесены в таблицу недостающих договоров.",
-                    "warning")
+                await flash("Протоколы успешно сгенерированы и сохранены.", "success")
 
             except Exception as e:
+                print(f"Ошибка при генерации протоколов: {e}")
                 await flash(f"Ошибка при генерации протоколов: {e}", "error")
 
             # Перенаправляем пользователя на нужную страницу

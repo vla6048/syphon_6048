@@ -35,7 +35,10 @@
                         <tr>
                             <td>{{ date[0].strftime('%Y-%m-%d') }}</td>
                             <td>
-                                <form action="{{ url_for('generate_protocols', protocol_date=date[0].strftime('%Y-%m-%d')) }}" method="POST">
+                                <form action="{{ url_for('generate_protocols') }}" method="POST">
+                                    <!-- Передаем месяц и год вместо даты -->
+                                    <input type="hidden" name="protocol_month" value="{{ date[0].month }}">
+                                    <input type="hidden" name="protocol_year" value="{{ date[0].year }}">
                                     <button type="submit" class="btn btn-secondary">Сгенерировать протоколы</button>
                                 </form>
                             </td>
