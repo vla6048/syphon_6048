@@ -1,5 +1,6 @@
-from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file, flash
+from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file, flash, Blueprint
 from quart_auth import QuartAuth, basic_auth_required
+from sqlalchemy import select, and_
 from docx import Document
 from dotenv import load_dotenv
 from num2words import num2words
@@ -39,6 +40,7 @@ class MyApp:
             db=os.getenv('MYSQL_DB_REMOTE')
         )
 
+        bp = Blueprint('generate_protocols', __name__)
         # Настройка маршрутов
         self.setup_routes()
 
@@ -89,18 +91,192 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/correct_agreement/<int:id>', methods=['POST'])
+        @basic_auth_required()
+        async def correct_agreement(id):
+            try:
+                # Получаем данные из таблицы protocols_missing_agreements по id
+                missing_agreement_query = """
+                    SELECT fop_inn, ri_inn, date_of_protocol, fop_change 
+                    FROM credentials.protocols_missing_agreements 
+                    WHERE id = %s;
+                """
+                missing_agreement = await self.local_db.execute_query(missing_agreement_query, (id,))
+
+                if not missing_agreement:
+                    await flash("Недостающий договор не найден.", "error")
+                    return redirect(url_for('missing_agreements'))
+
+                fop_inn, ri_inn, date_of_protocol, fop_change = missing_agreement[0]
+
+                # Проверяем наличие договора в таблице agreements
+                agreement_query = """
+                    SELECT agreements.id 
+                    FROM credentials.agreements AS agreements
+                    JOIN credentials.fop_credentials AS fop ON agreements.master_id = fop.id
+                    JOIN credentials.ri_credentials AS ri ON agreements.ri_id = ri.id
+                    WHERE fop.inn = %s AND ri.inn = %s;
+                """
+                agreement_result = await self.local_db.execute_query(agreement_query, (fop_inn, ri_inn))
+                agreement_id = agreement_result[0][0] if agreement_result else None
+
+                if agreement_id:
+                    # Вставляем данные в таблицу protocols_test
+                    proto_sum_caps = self.convert_to_currency_words(fop_change)
+
+                    insert_protocol_query = """
+                        INSERT INTO credentials.protocols_test (agreement, proto_date, proto_sum, proto_sum_caps)
+                        VALUES (%s, %s, %s, %s);
+                    """
+                    await self.local_db.execute_query(insert_protocol_query,
+                                                      (agreement_id, date_of_protocol, fop_change, proto_sum_caps))
+
+                    # Обновляем состояние в таблице protocols_missing_agreements
+                    update_missing_agreement_query = """
+                        UPDATE credentials.protocols_missing_agreements 
+                        SET agreement_state = 1 
+                        WHERE id = %s;
+                    """
+                    await self.local_db.execute_query(update_missing_agreement_query, (id,))
+
+                    await flash("Договор успешно исправлен и протокол добавлен.", "success")
+                    return redirect(url_for('missing_agreements'))
+                else:
+                    await flash("Договор не найден.", "error")
+                    return redirect(url_for('missing_agreements'))
+
+            except Exception as e:
+                await flash(f"Ошибка при исправлении договора: {e}", "error")
+                return redirect(url_for('missing_agreements'))
+
+        @self.app.route('/missing_agreements', methods=['GET'])
+        @basic_auth_required()
+        async def missing_agreements():
+            try:
+                # Получаем записи с agreement_state = 0
+                missing_agreements_query = """
+                    SELECT id, clientId, description, fop_inn, fop_name, fop_in, fop_change, fop_expense, fop_out, 
+                           type_agr, ri_inn, ri_name, date_of_protocol
+                    FROM credentials.protocols_missing_agreements
+                    WHERE agreement_state = 0;
+                """
+                agreements = await self.local_db.execute_query(missing_agreements_query)
+
+                # Возвращаем HTML-страницу с данными
+                return await render_template('missing_agreements.html', agreements=agreements)
+
+            except Exception as e:
+                await flash(f"Ошибка при загрузке недостающих договоров: {e}", "error")
+
+        @self.app.route('/agreement_insertion', methods=['GET'])
+        @basic_auth_required()
+        async def agreement_insertion():
+            # Загружаем всех инженеров для отображения в выпадающем списке
+            engineers_query = "SELECT id, name FROM credentials.ri_credentials;"
+            engineers = await self.local_db.execute_query(engineers_query)
+
+            # Отправляем список инженеров на страницу
+            return await render_template("agreement_insertion.html", engineers=engineers)
+
+        @self.app.route('/search_masters', methods=['GET'])
+        @basic_auth_required()
+        async def search_masters():
+            query = request.args.get("query", "")
+            search_query = """
+                SELECT id, name FROM credentials.fop_credentials 
+                WHERE name LIKE %s LIMIT 10;
+            """
+            results = await self.local_db.execute_query(search_query, (f"%{query}%",))
+            return jsonify([{"id": result[0], "name": result[1]} for result in results])
+
+        @self.app.route('/submit_agreement', methods=['POST'])
+        @basic_auth_required()
+        async def submit_agreement():
+            try:
+                # Используем await перед request.form для корректного извлечения данных формы
+                form_data = await request.form
+
+                agreement_name = form_data.get('agreement_name')
+                master_id = form_data.get('master_id')
+                engineer_id = form_data.get('engineer')
+                agreement_date = form_data.get('agreement_date')
+
+                # Вставка данных в таблицу agreements
+                insert_query = """
+                    INSERT INTO credentials.agreements (agreement_name, master_id, ri_id, agreement_date)
+                    VALUES (%s, %s, %s, %s);
+                """
+                await self.local_db.execute_query(insert_query,
+                                                  (agreement_name, master_id, engineer_id, agreement_date))
+
+                await flash("Новый договор успешно добавлен!", "success")
+            except Exception as e:
+                await flash(f"Ошибка при добавлении договора: {e}", "error")
+
+            # Перенаправление на страницу добавления договора
+            return redirect(url_for('agreement_insertion'))
+
         @self.app.route('/generate_protocols', methods=['POST'])
+        @basic_auth_required()
         async def generate_protocols():
-            protocol_date = request.args.get('protocol_date')
+            try:
+                # Получаем все записи из таблицы soft_estimates
+                soft_estimates_query = """
+                    SELECT id, clientId, description, fop_inn, fop_name, fop_in, fop_change, fop_expense, fop_out, type_agr, ri_inn, ri_name, date_of_protocol
+                    FROM credentials.soft_estimates;
+                """
+                soft_estimates = await self.local_db.execute_query(soft_estimates_query)
 
-            if protocol_date:
-                # Ваша логика генерации протоколов по `protocol_date`
-                print(f"Генерация протоколов для даты: {protocol_date}")
+                for record in soft_estimates:
+                    (id, clientId, description, fop_inn, fop_name, fop_in, fop_change,
+                     fop_expense, fop_out, type_agr, ri_inn, ri_name, date_of_protocol) = record
 
-            # После генерации вернемся обратно на страницу загрузки
+                    # Ищем соответствующий договор в таблице agreements
+                    agreement_query = """
+                        SELECT agreements.id 
+                        FROM credentials.agreements AS agreements
+                        JOIN credentials.fop_credentials AS fop ON agreements.master_id = fop.id
+                        JOIN credentials.ri_credentials AS ri ON agreements.ri_id = ri.id
+                        WHERE fop.inn = %s AND ri.inn = %s;
+                    """
+                    agreement_result = await self.local_db.execute_query(agreement_query, (fop_inn, ri_inn))
+                    agreement = agreement_result[0][0] if agreement_result else None
+
+                    if agreement:
+                        # Договор найден, вставляем данные в таблицу protocols_test
+                        proto_sum_caps = self.convert_to_currency_words(fop_change)
+
+                        insert_protocol_query = """
+                            INSERT INTO credentials.protocols (agreement, proto_date, proto_sum, proto_sum_caps)
+                            VALUES (%s, %s, %s, %s);
+                        """
+                        await self.local_db.execute_query(insert_protocol_query,
+                                                          (agreement, date_of_protocol, fop_change, proto_sum_caps))
+                    else:
+                        # Договор не найден, копируем все данные в protocols_missing_agreements
+                        insert_missing_agreement_query = """
+                            INSERT INTO credentials.protocols_missing_agreements 
+                            (clientId, description, fop_inn, fop_name, fop_in, fop_change, fop_expense, fop_out, 
+                             type_agr, ri_inn, ri_name, date_of_protocol, agreement_state)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                        """
+                        await self.local_db.execute_query(insert_missing_agreement_query,
+                                                          (clientId, description, fop_inn, fop_name, fop_in, fop_change,
+                                                           fop_expense,
+                                                           fop_out, type_agr, ri_inn, ri_name, date_of_protocol, False))
+
+                await flash(
+                    "Протоколы успешно сгенерированы и сохранены. Некоторые записи перенесены в таблицу недостающих договоров.",
+                    "warning")
+
+            except Exception as e:
+                await flash(f"Ошибка при генерации протоколов: {e}", "error")
+
+            # Перенаправляем пользователя на нужную страницу
             return redirect(url_for('estimates_upload'))
 
         @self.app.route('/estimates_upload', methods=['GET', 'POST'])
+        @basic_auth_required()
         async def estimates_upload():
             # Обработка POST запроса для загрузки данных
             if request.method == 'POST':

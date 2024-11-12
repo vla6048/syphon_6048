@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Добавить договор</title>
+    <!-- Убедитесь, что jQuery загружается правильно -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+</head>
+<body>
+    <h1>Добавить новый договор</h1>
+    <form id="agreementForm" method="POST" action="{{ url_for('submit_agreement') }}">
+        <label for="agreement_name">Название договора:</label>
+        <input type="text" id="agreement_name" name="agreement_name" required><br><br>
+
+        <label for="master">Мастер:</label>
+        <input type="text" id="master_name" name="master_name" autocomplete="off" required>
+        <input type="hidden" id="master_id" name="master_id">
+        <div id="master_suggestions"></div><br><br>
+
+        <label for="engineer">Инженер:</label>
+        <select id="engineer" name="engineer" required>
+            {% for engineer in engineers %}
+            <option value="{{ engineer[0] }}">{{ engineer[1] }}</option>
+            {% endfor %}
+        </select><br><br>
+
+        <label for="agreement_date">Дата договора:</label>
+        <input type="date" id="agreement_date" name="agreement_date" required><br><br>
+
+        <button type="submit">Сохранить</button>
+    </form>
+
+    <script>
+        $(document).ready(function() {
+            // Обработчик для автозаполнения поля "Мастер"
+            $('#master_name').on('input', function() {
+                const query = $(this).val();
+                if (query.length > 1) {
+                    $.ajax({
+                        url: "{{ url_for('search_masters') }}",
+                        method: "GET",
+                        data: { query: query },
+                        success: function(data) {
+                            $('#master_suggestions').empty();
+                            data.forEach(function(master) {
+                                $('#master_suggestions').append(`<div class="suggestion" data-id="${master.id}">${master.name}</div>`);
+                            });
+                        },
+                        error: function(xhr, status, error) {
+                            console.error("AJAX error: ", status, error);
+                        }
+                    });
+                } else {
+                    $('#master_suggestions').empty();
+                }
+            });
+
+            // Выбор мастера из предложений
+            $('#master_suggestions').on('click', '.suggestion', function() {
+                const masterId = $(this).data('id');
+                const masterName = $(this).text();
+                $('#master_name').val(masterName);
+                $('#master_id').val(masterId);
+                $('#master_suggestions').empty();
+            });
+        });
+    </script>
+</body>
+</html>
