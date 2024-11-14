@@ -91,6 +91,209 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/llc_acts/<int:agreement_id>/generate_protocol', methods=['GET'])
+        @basic_auth_required()
+        async def generate_llc_protocol(agreement_id):
+            # Получаем данные по договору и связанные данные для замены в шаблоне
+            agreement_query = """
+            SELECT la.id AS proto_num, la.agreement_name, la.agreement_date, 
+                   lc.name AS llc_name, lc.in_persona, lc.address AS llc_address, lc.edrpou AS llc_edrpou, 
+                   lc.iban AS llc_iban, lc.bank_account_detail AS bank_account_detail_llc, lc.inn AS llc_inn, lc.name_short AS llc_shortname,
+                   ri.name AS ri_name, ri.inn AS ri_inn, ri.pidstava, ri.address AS ri_address, 
+                   ri.iban AS ri_iban, ri.bank_account_detail AS bank_account_detail_ri, ri.name_short AS ri_shortname
+            FROM credentials.llc_agreements AS la
+            JOIN credentials.llc_credentials AS lc ON la.llc_id = lc.id
+            JOIN credentials.ri_credentials AS ri ON la.ri_id = ri.id
+            WHERE la.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+
+            # Проверка, что данные по договору найдены
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            # Извлечение данных из результата
+            agreement = agreement_data[0]
+            for elements in agreement:
+                print(f"{agreement.index(elements)}: {elements}")
+
+            # Проверка ЕДРПОУ организации
+            llc_edrpou = agreement[6]
+            if llc_edrpou == "38736443":
+                # Логика для случая, когда ЕДРПОУ == 38736443
+                # (реализация будет позже)
+                pass
+            else:
+                # Загружаем шаблон llc_proto.docx
+                template_path = 'static/docs/llc_proto.docx'
+                doc = Document(template_path)
+
+                # Формируем номер протокола
+                proto_num = f"{agreement[0]}_{agreement[2].strftime('%Y-%m-%d')}_{agreement[1]}"
+
+                # Задаем значения для замены
+                replacements = {
+                    '@proto_num': proto_num,
+                    '@agr_name': agreement[1],
+                    '@agr_date': self.format_date(agreement[2])[0],
+                    '@llc_name': agreement[3],
+                    '@persona': agreement[4],
+                    '@ri_name': agreement[11],
+                    '@ri_inn': agreement[12],
+                    '@pidstava': agreement[13],
+                    '@llc_address': agreement[5],
+                    '@llc_edrpou': llc_edrpou,
+                    '@llc_iban': agreement[7],
+                    '@bank_account_detail_llc': agreement[8],
+                    '@llc_inn': agreement[9],
+                    '@llc_shortname': agreement[10],
+                    '@ri_address': agreement[14],
+                    '@ri_iban': agreement[15],
+                    '@bank_account_detail_ri': agreement[16],
+                    '@ri_shortname': agreement[17]
+                }
+
+                # Замена текста в шаблоне
+                self.replace_text_in_document(doc, replacements)
+                self.replace_in_tables(doc.tables, replacements)
+
+                # Сохранение документа
+                doc_io = BytesIO()
+                doc.save(doc_io)
+                doc_io.seek(0)
+
+                # Формируем название файла
+                file_name = f"{agreement[1]} Протокол.docx"
+
+                # Отправка документа клиенту
+                return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
+
+        @self.app.route('/llc_acts/<int:agreement_id>/delete/<int:act_id>', methods=['POST'])
+        @basic_auth_required()
+        async def delete_act(agreement_id, act_id):
+            # Удаление акта из базы данных
+            delete_query = """
+            UPDATE credentials.llc_acts SET act_state=0 
+            where id = %s AND agreement = %s
+            """
+            await self.local_db.execute_query(delete_query, (act_id, agreement_id))
+
+            # Перенаправление обратно на страницу актов
+            return redirect(url_for('llc_acts', agreement_id=agreement_id))
+
+        @self.app.route('/llc_acts/<int:agreement_id>', methods=['GET', 'POST'])
+        @basic_auth_required()
+        async def llc_acts(agreement_id):
+            if request.method == 'POST':
+                # Получение данных из формы
+                act_date = (await request.form)['act_date']
+                act_sum = (await request.form)['act_sum']
+
+                # Вставка нового акта в базу данных
+                insert_query = """
+                INSERT INTO credentials.llc_acts (agreement, act_date, act_sum, act_state)
+                VALUES (%s, %s, %s, 1);
+                """
+                await self.local_db.execute_query(insert_query, (agreement_id, act_date, act_sum))
+
+                # Перезагрузка страницы после добавления акта
+                return redirect(url_for('llc_acts', agreement_id=agreement_id))
+
+            # Запрос данных по договору и связанных таблиц
+            agreement_query = """
+            SELECT la.agreement_name, lc.name AS organization_name, lc.edrpou, ri.name AS engineer_name
+            FROM credentials.llc_agreements AS la
+            JOIN credentials.llc_credentials AS lc ON la.llc_id = lc.id
+            JOIN credentials.ri_credentials AS ri ON la.ri_id = ri.id
+            WHERE la.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+
+            # Проверка на случай отсутствия данных о договоре
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            # Извлечение данных о договоре из результата запроса
+            agreement = {
+                'agreement_name': agreement_data[0][0],
+                'organization_name': agreement_data[0][1],
+                'edrpou': agreement_data[0][2],
+                'engineer_name': agreement_data[0][3]
+            }
+
+            # Запрос данных об актах, связанных с договором
+            acts_query = """
+            SELECT id, act_date, act_sum, act_state
+            FROM credentials.llc_acts
+            WHERE agreement = %s AND act_state = 1;
+            """
+            acts_data = await self.local_db.execute_query(acts_query, (agreement_id,))
+
+            # Преобразование данных о актах в список словарей
+            acts = [
+                {
+                    'id': act[0],
+                    'act_date': act[1],
+                    'act_sum': act[2],
+                    'act_state': act[3]
+                }
+                for act in acts_data
+            ]
+
+            # Отображение страницы актов с информацией о договоре
+            return await render_template('llc_acts.html', agreement=agreement, acts=acts, agreement_id=agreement_id)
+
+        @self.app.route('/llc_agreements', methods=['GET'])
+        @basic_auth_required()
+        async def llc_agreements():
+            # SQL-запрос для получения информации о всех договорах
+            query = """
+            SELECT la.id, la.agreement_name, la.agreement_date, llc.name AS llc_name, llc.canton AS canton, ri.name AS engineer_name
+            FROM credentials.llc_agreements la
+            JOIN credentials.llc_credentials llc ON la.llc_id = llc.id
+            JOIN credentials.ri_credentials ri ON la.ri_id = ri.id;
+            """
+
+            # Выполняем запрос и получаем данные по договорам
+            agreements_data = await self.local_db.execute_query(query)
+
+            all_years = set()
+            agreements_list = []
+
+            # Преобразуем каждый кортеж в словарь
+            for agreement in agreements_data:
+                agreement_dict = {
+                    'id': agreement[0],
+                    'agreement_name': agreement[1],
+                    'agreement_date': agreement[2],
+                    'llc_name': agreement[3],
+                    'canton': agreement[4],
+                    'engineer_name': agreement[5],
+                    'acts_by_year': {}
+                }
+
+                # Для каждого договора получаем данные по актам
+                act_query = """
+                SELECT YEAR(act_date) AS act_year, MONTH(act_date) AS act_month
+                FROM credentials.llc_acts
+                WHERE act_state = 1 AND agreement = %s
+                ORDER BY act_year, act_month;
+                """
+                act_data = await self.local_db.execute_query(act_query, (agreement[0],))
+
+                # Сортируем акты по годам
+                for row in act_data:
+                    year, month = row
+                    if year not in agreement_dict['acts_by_year']:
+                        agreement_dict['acts_by_year'][year] = []
+                    agreement_dict['acts_by_year'][year].append(month)
+                    all_years.add(year)
+
+                agreements_list.append(agreement_dict)
+
+            # Передаем все данные в шаблон, включая все уникальные годы
+            return await render_template('llc_agreements.html', agreements=agreements_list, all_years=sorted(all_years))
+
         @self.app.route('/correct_agreement/<int:id>', methods=['POST'])
         @basic_auth_required()
         async def correct_agreement(id):

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Акты по договору</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 20px;
+        }
+        table {
+            margin-top: 20px;
+        }
+        h1, h3 {
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">Акты по договору: {{ agreement.agreement_name }}</h1>
+        <h3>Организация: {{ agreement.organization_name }}</h3>
+        <h3>ЕДРПОУ Организации: {{ agreement.edrpou }}</h3>
+        <h3>Инженер: {{ agreement.engineer_name }}</h3>
+
+        <a href="{{ url_for('generate_llc_protocol', agreement_id=agreement_id) }}" class="btn btn-warning mb-4">Единоразовый протокол</a>
+
+        {% if acts %}
+        <div class="table-responsive">
+            <table class="table table-striped table-bordered">
+                <thead>
+                    <tr>
+                        <th>Месяц и год</th>
+                        <th>Сумма</th>
+                        <th>Рахунок</th>
+                        <th>АКТ</th>
+                        <th>ЗВІТ</th>
+                        <th>Удалить</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for act in acts %}
+                    <tr>
+                        <td>{{ act.act_date.strftime('%B %Y') }}</td>
+                        <td>{{ act.act_sum }}</td>
+                        <td><button class="btn btn-primary">Рахунок</button></td>
+                        <td><button class="btn btn-primary">АКТ</button></td>
+                        <td><button class="btn btn-primary">ЗВІТ</button></td>
+                        <td>
+                            <form action="{{ url_for('delete_act', agreement_id=agreement_id, act_id=act.id) }}" method="post" style="display:inline;">
+                                <button type="submit" class="btn btn-danger">Удалить</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Нет данных об актах по этому договору.</p>
+        {% endif %}
+
+        <h2 class="mt-4">Добавить новый акт</h2>
+        <form method="POST" onsubmit="convertCommaToDot()">
+            <div class="mb-3">
+                <label for="act_date" class="form-label">Дата акта:</label>
+                <input type="date" id="act_date" name="act_date" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label for="act_sum" class="form-label">Сумма акта:</label>
+                <input type="text" id="act_sum" name="act_sum" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-success">Сохранить</button>
+        </form>
+
+        <a href="{{ url_for('llc_agreements') }}" class="btn btn-secondary mt-3">Вернуться к списку договоров</a>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function convertCommaToDot() {
+            var inputField = document.getElementById('act_sum');
+            inputField.value = inputField.value.replace(',', '.');
+        }
+    </script>
+</body>
+</html>

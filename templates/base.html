@@ -44,9 +44,10 @@
                     </a>
                     <div class="dropdown-menu" aria-labelledby="documentsDropdown">
                         <a class="dropdown-item" href="{{ url_for('fop_form') }}">Внесение данных ФОП</a>
-                        <a class="dropdown-item" href="{{ url_for('agreements') }}">Просмотр договоров</a>
-                        <a class="dropdown-item" href="{{ url_for('estimates_upload') }}">Загрузка расчетов Софт</a>
                         <a class="dropdown-item" href="{{ url_for('agreement_insertion') }}">Внесение договоров</a>
+                        <a class="dropdown-item" href="{{ url_for('estimates_upload') }}">Загрузка расчетов Софт</a>
+                        <a class="dropdown-item" href="{{ url_for('agreements') }}">Просмотр договоров</a>
+                        <a class="dropdown-item" href="{{ url_for('llc_agreements') }}">Просмотр договоров ТОВ</a>
                     </div>
                 </li>
             </ul>
