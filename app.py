@@ -114,59 +114,57 @@ class MyApp:
 
             # Извлечение данных из результата
             agreement = agreement_data[0]
-            for elements in agreement:
-                print(f"{agreement.index(elements)}: {elements}")
 
             # Проверка ЕДРПОУ организации
             llc_edrpou = agreement[6]
-            if llc_edrpou == "38736443":
-                # Логика для случая, когда ЕДРПОУ == 38736443
-                # (реализация будет позже)
-                pass
+            print(llc_edrpou)
+            print(type(llc_edrpou))
+            if llc_edrpou == 38736443:
+                template_path = 'static/docs/KDN_proto.docx'
             else:
                 # Загружаем шаблон llc_proto.docx
                 template_path = 'static/docs/llc_proto.docx'
-                doc = Document(template_path)
 
-                # Формируем номер протокола
-                proto_num = f"{agreement[0]}_{agreement[2].strftime('%Y-%m-%d')}_{agreement[1]}"
+            doc = Document(template_path)
+            # Формируем номер протокола
+            proto_num = f"{agreement[0]}_{agreement[2].strftime('%Y-%m-%d')}_{agreement[1]}"
 
-                # Задаем значения для замены
-                replacements = {
-                    '@proto_num': proto_num,
-                    '@agr_name': agreement[1],
-                    '@agr_date': self.format_date(agreement[2])[0],
-                    '@llc_name': agreement[3],
-                    '@persona': agreement[4],
-                    '@ri_name': agreement[11],
-                    '@ri_inn': agreement[12],
-                    '@pidstava': agreement[13],
-                    '@llc_address': agreement[5],
-                    '@llc_edrpou': llc_edrpou,
-                    '@llc_iban': agreement[7],
-                    '@bank_account_detail_llc': agreement[8],
-                    '@llc_inn': agreement[9],
-                    '@llc_shortname': agreement[10],
-                    '@ri_address': agreement[14],
-                    '@ri_iban': agreement[15],
-                    '@bank_account_detail_ri': agreement[16],
-                    '@ri_shortname': agreement[17]
-                }
+            # Задаем значения для замены
+            replacements = {
+                '@proto_num': proto_num,
+                '@agr_name': agreement[1],
+                '@agr_date': self.format_date(agreement[2])[0],
+                '@llc_name': agreement[3],
+                '@persona': agreement[4],
+                '@ri_name': agreement[11],
+                '@ri_inn': agreement[12],
+                '@pidstava': agreement[13],
+                '@llc_address': agreement[5],
+                '@llc_edrpou': llc_edrpou,
+                '@llc_iban': agreement[7],
+                '@bank_account_detail_llc': agreement[8],
+                '@llc_inn': agreement[9],
+                '@llc_shortname': agreement[10],
+                '@ri_address': agreement[14],
+                '@ri_iban': agreement[15],
+                '@bank_account_detail_ri': agreement[16],
+                '@ri_shortname': agreement[17]
+            }
 
-                # Замена текста в шаблоне
-                self.replace_text_in_document(doc, replacements)
-                self.replace_in_tables(doc.tables, replacements)
+            # Замена текста в шаблоне
+            self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
 
-                # Сохранение документа
-                doc_io = BytesIO()
-                doc.save(doc_io)
-                doc_io.seek(0)
+            # Сохранение документа
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
 
-                # Формируем название файла
-                file_name = f"{agreement[1]} Протокол.docx"
+            # Формируем название файла
+            file_name = f"{agreement[1]} Протокол.docx"
 
-                # Отправка документа клиенту
-                return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
+            # Отправка документа клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
         @self.app.route('/llc_acts/<int:agreement_id>/delete/<int:act_id>', methods=['POST'])
         @basic_auth_required()
