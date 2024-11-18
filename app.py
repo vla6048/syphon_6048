@@ -980,6 +980,64 @@ class MyApp:
         # async def index():
         #     return jsonify({"message": "Добро пожаловать в Quart приложение!"})
 
+        @self.app.route('/fetch-logs-and-store', methods=['GET'])
+        async def fetch_logs_and_store():
+            """
+            Подключается к удаленной базе данных, извлекает данные из таблиц command_logs.logs и mrtg.switches
+            для определенных кантонов и сохраняет их в локальной базе данных dbsyphon.ntst_logs,
+            пропуская записи с уже существующими идентификаторами.
+            """
+            # Подключение к удаленной базе данных
+            try:
+                await self.remote_db.connect()
+            except Exception as e:
+                return jsonify({"error": "Удаленная база данных недоступна, попробуйте позже."}), 503
+
+            # Запрос данных из удаленной базы данных
+            remote_query = """
+            SELECT log.id, log.datetime, log.ip, sw.canton, sw.model, sw.rank
+            FROM command_logs.logs log
+            JOIN mrtg.switches sw ON log.ip = sw.ip
+            WHERE sw.canton IN (
+                'Минский', 'Оболонский', 'Голосеевский', 'Виноградарский', 
+                'Лукьяновский', 'Святошинский', 'Бощаговский', 'Теремковский'
+            )
+            """
+            remote_data = await self.remote_db.execute_query(remote_query)
+
+            # Закрытие соединения с удаленной базой данных
+            await self.remote_db.close()
+
+            if not remote_data:
+                return jsonify({
+                    "message": "Данные успешно получены, но новых данных нет.",
+                    "new_data_count": 0
+                }), 200
+
+            # Вставка данных в локальную базу данных
+            insert_query = """
+            INSERT INTO dbsyphon.ntst_logs (id, log_date, ip, canton, model, sw_rank)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            check_query = "SELECT COUNT(*) FROM dbsyphon.ntst_logs WHERE id = %s"
+
+            new_data_count = 0
+            for record in remote_data:
+                # Проверка наличия записи в локальной базе данных
+                existing_count = await self.local_db.execute_query(check_query, (record[0],))
+
+                # Если запись не существует, выполняем вставку
+                if existing_count[0][0] == 0:
+                    await self.local_db.execute_query(
+                        insert_query,
+                        (record[0], record[1], record[2], record[3], record[4], record[5])
+                    )
+                    new_data_count += 1
+
+            return jsonify({
+                "message": "Данные успешно получены и сохранены в локальной базе данных.",
+                "new_data_count": new_data_count
+            })
         @self.app.route('/fetch-and-store', methods=['GET'])
         async def fetch_and_store():
             """
