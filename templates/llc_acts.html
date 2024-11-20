@@ -37,6 +37,7 @@
                     <tr>
                         <th>Месяц и год</th>
                         <th>Сумма</th>
+                        <th>Сгенерировать данные</th>
                         <th>Рахунок</th>
                         <th>АКТ</th>
                         <th>ЗВІТ</th>
@@ -48,9 +49,20 @@
                     <tr>
                         <td>{{ act.act_date.strftime('%B %Y') }}</td>
                         <td>{{ act.act_sum }}</td>
-                        <td><button class="btn btn-primary">Рахунок</button></td>
-                        <td><button class="btn btn-primary">АКТ</button></td>
-                        <td><button class="btn btn-primary">ЗВІТ</button></td>
+                        <td>
+                            <form action="/llc_acts/{{ agreement_id }}/generate_data/{{ act.id }}" method="POST" style="display: inline;">
+                                <button type="submit" class="btn btn-warning" {% if act.has_data %}disabled{% endif %}>Сгенерировать данные</button>
+                            </form>
+                        </td>
+                        <td>
+                            <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>Рахунок</button>
+                        </td>
+                        <td>
+                            <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>АКТ</button>
+                        </td>
+                        <td>
+                            <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>ЗВІТ</button>
+                        </td>
                         <td>
                             <form action="{{ url_for('delete_act', agreement_id=agreement_id, act_id=act.id) }}" method="post" style="display:inline;">
                                 <button type="submit" class="btn btn-danger">Удалить</button>

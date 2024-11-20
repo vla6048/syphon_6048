@@ -11,6 +11,10 @@ from io import BytesIO
 import pandas as pd
 import pdb
 from db_manager import DatabaseManager
+import random
+import itertools
+from random import choices
+from math import floor
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -89,7 +93,174 @@ class MyApp:
         minutes = int((work_hours-hours)*60)
         return f"{hours} годин {minutes} хвилин"
 
+
     def setup_routes(self):
+
+        @self.app.route('/llc_acts/<int:agreement_id>/generate_data/<int:act_id>', methods=['POST'])
+        # @basic_auth_required()
+        async def generate_act_data(agreement_id, act_id):
+            # Шаг 1. Получение данных из таблицы llc_acts
+            act_query = """
+            SELECT act_date, act_sum, agreement
+            FROM credentials.llc_acts
+            WHERE id = %s;
+            """
+            act_data = await self.local_db.execute_query(act_query, (act_id,))
+
+            if not act_data:
+                return "Акт не найден", 404
+
+            act_date, act_sum, agreement = act_data[0]
+
+            # Шаг 2. Получение llc_id и ri_id по agreement
+            agreement_query = """
+            SELECT llc_id, ri_id
+            FROM credentials.llc_agreements
+            WHERE id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement,))
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            llc_id, ri_id = agreement_data[0]
+
+            # Шаг 3. Получение edrpou по llc_id
+            edrpou_query = """
+            SELECT edrpou
+            FROM credentials.llc_credentials
+            WHERE id = %s;
+            """
+            edrpou_data = await self.local_db.execute_query(edrpou_query, (llc_id,))
+
+            if not edrpou_data:
+                return "Организация не найдена", 404
+
+            edrpou = edrpou_data[0][0]
+
+            # Шаг 4. Логика в зависимости от edrpou
+            if edrpou == 38736443:
+                # Первая логика
+                await handle_kdn_logic(act_date, act_sum, agreement, ri_id, act_id)
+            else:
+                # Вторая логика
+                await handle_llc_logic(act_date, act_sum, agreement, ri_id)
+
+            return redirect(url_for('llc_acts', agreement_id=agreement_id))
+
+        async def handle_llc_logic(self, act_date, act_sum, agreement, ri_id):
+            pass
+
+        async def handle_kdn_logic(act_date, act_sum, agreement, ri_id, act_id):
+            # Установленные цены
+            # Установленные цены
+            UNIT_COST = 1000  # Стоимость одной единицы оборудования или часа консультации
+
+            # Получение данных оборудования ранга 1
+            rank1_query = """
+            SELECT group_concat(sw.model separator '\n') AS models_list,
+                   count(sw.id) AS total_count,
+                   group_concat(sw.ip separator '\n') AS ip_list
+            FROM dbsyphon.switches_report sw
+            JOIN credentials.engineer_cantons cant ON sw.canton = cant.canton
+            WHERE sw.switch_rank = 1 AND cant.engineer_id = %s;
+            """
+            rank1_data = await self.local_db.execute_query(rank1_query, (ri_id,))
+            rank1_models, rank1_count, rank1_ips = rank1_data[0]
+
+            # Получение данных оборудования ранга 2
+            rank2_query = """
+            SELECT group_concat(sw.model separator '\n') AS models_list,
+                   count(sw.id) AS total_count,
+                   group_concat(sw.ip separator '\n') AS ip_list
+            FROM dbsyphon.switches_report sw
+            JOIN credentials.engineer_cantons cant ON sw.canton = cant.canton
+            WHERE sw.switch_rank = 2 AND cant.engineer_id = %s;
+            """
+            rank2_data = await self.local_db.execute_query(rank2_query, (ri_id,))
+            rank2_models, rank2_count, rank2_ips = rank2_data[0]
+
+            # Преобразование данных в списки
+            rank1_models = rank1_models.split("\n") if rank1_models else []
+            rank1_ips = rank1_ips.split("\n") if rank1_ips else []
+            rank2_models = rank2_models.split("\n") if rank2_models else []
+            rank2_ips = rank2_ips.split("\n") if rank2_ips else []
+
+            # Логика распределения суммы с добавлением случайности
+            remaining_sum = act_sum
+
+            # Добавляем небольшой рандом в количество настроек
+            rank1_random_factor = random.uniform(0.8, 1.2)  # 80% - 120%
+            rank2_random_factor = random.uniform(0.8, 1.2)
+
+            rank1_units = min(floor(remaining_sum / UNIT_COST * rank1_random_factor), rank1_count)
+            remaining_sum -= rank1_units * UNIT_COST
+
+            rank2_units = min(floor(remaining_sum / UNIT_COST * rank2_random_factor), rank2_count)
+            remaining_sum -= rank2_units * UNIT_COST
+
+            # Рандомизация времени консультации
+            consultation_random_factor = random.uniform(0.8, 1.2)
+            consultation_hours = floor((remaining_sum / UNIT_COST) * consultation_random_factor)
+            consultation_minutes = round((remaining_sum % UNIT_COST) / UNIT_COST * 60 * consultation_random_factor)
+
+            # Логика выбора оборудования с учетом возможного повторения
+            selected_rank1 = list(itertools.islice(itertools.cycle(zip(rank1_models, rank1_ips)), rank1_units))
+            selected_rank2 = list(itertools.islice(itertools.cycle(zip(rank2_models, rank2_ips)), rank2_units))
+            consultation_candidates = list(itertools.chain(zip(rank1_models, rank1_ips), zip(rank2_models, rank2_ips)))
+            selected_consultation = choices(consultation_candidates, k=max(1, consultation_hours))
+
+            # Формирование отчета для ранга 1
+            rank1_report = {
+                "models": [x[0] for x in selected_rank1],
+                "ips": [x[1] for x in selected_rank1],
+                "count": rank1_units
+            }
+
+            # Формирование отчета для ранга 2
+            rank2_report = {
+                "models": [x[0] for x in selected_rank2],
+                "ips": [x[1] for x in selected_rank2],
+                "count": rank2_units
+            }
+
+            # Формирование отчета для консультации
+            consultation_report = {
+                "models": [x[0] for x in selected_consultation],
+                "ips": [x[1] for x in selected_consultation],
+                "time": f"{consultation_hours} ч {consultation_minutes} мин"
+            }
+
+            # Вставка данных в таблицу llc_acts_data для ранга 1
+            await self.local_db.execute_query("""
+                INSERT INTO credentials.llc_acts_data 
+                (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+            act_id, 1, '\n'.join(rank1_report["models"]), rank1_report["count"], '\n'.join(rank1_report["ips"]), 0))
+
+            # Вставка данных в таблицу llc_acts_data для ранга 2
+            await self.local_db.execute_query("""
+                INSERT INTO credentials.llc_acts_data 
+                (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+            act_id, 2, '\n'.join(rank2_report["models"]), rank2_report["count"], '\n'.join(rank2_report["ips"]), 0))
+
+            # Вставка данных в таблицу llc_acts_data для консультаций
+            consultation_time_in_float = consultation_hours + (consultation_minutes / 60.0)
+            await self.local_db.execute_query("""
+                INSERT INTO credentials.llc_acts_data 
+                (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (act_id, 0, '\n'.join(consultation_report["models"]), 0, '\n'.join(consultation_report["ips"]),
+                  consultation_time_in_float))
+
+            # Печать результата для отладки
+            print(f"Настройка оборудования ранга 1 {str(rank1_report)}")
+            print(f"Настройка оборудования ранга 2 {str(rank2_report)}")
+            print(f"Консультация по работе оборудования {str(consultation_report)}")
+
 
         @self.app.route('/llc_acts/<int:agreement_id>/generate_protocol', methods=['GET'])
         @basic_auth_required()
@@ -207,11 +378,9 @@ class MyApp:
             """
             agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
 
-            # Проверка на случай отсутствия данных о договоре
             if not agreement_data:
                 return "Договор не найден", 404
 
-            # Извлечение данных о договоре из результата запроса
             agreement = {
                 'agreement_name': agreement_data[0][0],
                 'organization_name': agreement_data[0][1],
@@ -219,7 +388,7 @@ class MyApp:
                 'engineer_name': agreement_data[0][3]
             }
 
-            # Запрос данных об актах, связанных с договором
+            # Запрос данных об актах
             acts_query = """
             SELECT id, act_date, act_sum, act_state
             FROM credentials.llc_acts
@@ -227,18 +396,29 @@ class MyApp:
             """
             acts_data = await self.local_db.execute_query(acts_query, (agreement_id,))
 
+            # Проверка данных в таблице llc_acts_data
+            acts_with_data_query = """
+            SELECT act_id FROM credentials.llc_acts_data WHERE act_id IN (%s);
+            """
+            act_ids = [act[0] for act in acts_data]
+            acts_with_data = await self.local_db.execute_query(
+                acts_with_data_query,
+                (','.join(map(str, act_ids)),)
+            )
+            acts_with_data_ids = {row[0] for row in acts_with_data}
+
             # Преобразование данных о актах в список словарей
             acts = [
                 {
                     'id': act[0],
                     'act_date': act[1],
                     'act_sum': act[2],
-                    'act_state': act[3]
+                    'act_state': act[3],
+                    'has_data': act[0] in acts_with_data_ids
                 }
                 for act in acts_data
             ]
 
-            # Отображение страницы актов с информацией о договоре
             return await render_template('llc_acts.html', agreement=agreement, acts=acts, agreement_id=agreement_id)
 
         @self.app.route('/llc_agreements', methods=['GET'])
@@ -1243,4 +1423,6 @@ asgi_app = app.app
 
 
 if __name__ == '__main__':
-    asgi_app.run()
+    app = MyApp()
+    app.run()
+    # asgi_app.run()
