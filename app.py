@@ -1052,7 +1052,7 @@ class MyApp:
                 return jsonify({"error": "Удаленная база данных недоступна, попробуйте позже."}), 503
 
             # Получение списка IP-адресов из локальной базы данных
-            ip_query = "SELECT ip_address FROM dbsyphon.devices;"
+            ip_query = "SELECT ip_address FROM dbsyphon.devices"
             ip_addresses = await self.local_db.execute_query(ip_query)
 
             if not ip_addresses:
@@ -1106,6 +1106,132 @@ class MyApp:
                 "message": "Данные успешно получены и сохранены в локальной базе данных.",
                 "new_data_count": new_data_count
             })
+
+        @self.app.route('/sync-switches-report', methods=['GET'])
+        async def sync_switches_report():
+            """
+            Синхронизирует данные из удаленной таблицы `switches` с локальной базой данных.
+            Проверяет доступность удаленной базы данных и использует `fetch_info` для отслеживания последней синхронизации.
+            """
+
+            # Шаг 1: Проверка доступности удаленной базы данных
+            try:
+                await self.remote_db.connect()
+            except Exception as e:
+                return jsonify({"error": "Удаленная база данных недоступна, попробуйте позже."}), 503
+
+            # Шаг 2: Получение времени последней модификации из локальной базы данных
+            modification_time_query = """
+            SELECT modification_time 
+            FROM dbsyphon.fetch_info 
+            WHERE db = 'dbsyphon' AND db_table = 'switches_report';
+            """
+            modification_time_result = await self.local_db.execute_query(modification_time_query)
+
+            # Получаем текущую дату
+            current_date = date.today()
+
+            if not modification_time_result:
+                # Вариант 1: Пустой ответ - запись отсутствует, значит, синхронизация еще не выполнялась
+                # Вставляем запись в `fetch_info` с сегодняшней датой
+                insert_fetch_info_query = """
+                INSERT INTO dbsyphon.fetch_info (db, db_table, modification_time)
+                VALUES ('dbsyphon', 'switches_report', %s);
+                """
+                await self.local_db.execute_query(insert_fetch_info_query, (current_date,))
+
+                # Выполняем запрос к удаленной базе для получения всех нужных данных
+                remote_query = """
+                SELECT sw.canton, sw.model, sw.ip, sw.rank
+                FROM mrtg.switches sw
+                WHERE sw.canton IN ('Минский', 'Оболонский', 'Голосеевский', 'Виноградарский', 
+                                    'Лукьяновский', 'Святошинский', 'Бощаговский', 'Теремковский') 
+                    AND sw.model NOT IN ('Контроль питания, ранг 3', 
+                                         'Контроль питания, ранг 2', 
+                                         'Контроль питания, генератор', 
+                                         'DGS-1100-06/ME R3', 
+                                         'Датчик дыма');
+                """
+                remote_data = await self.remote_db.execute_query(remote_query)
+
+                # Вставка данных в локальную таблицу `switches_report`
+                insert_switches_report_query = """
+                INSERT INTO dbsyphon.switches_report (canton, model, ip, switch_rank)
+                VALUES (%s, %s, %s, %s);
+                """
+                for record in remote_data:
+                    await self.local_db.execute_query(insert_switches_report_query, record)
+
+                await self.remote_db.close()
+                return jsonify({"message": "Данные успешно получены и добавлены в switches_report."}), 200
+
+            # Обработка случая, когда результат есть
+            last_modification_date = modification_time_result[0][0]
+
+            if last_modification_date == current_date:
+                # Вариант 2: Синхронизация уже выполнена сегодня
+                await self.remote_db.close()
+                return jsonify({"message": "Синхронизация уже проводилась сегодня."}), 200
+
+            else:
+                # Вариант 3: Дата модификации отличается от сегодняшней - создаем архивную таблицу
+                # Создание таблицы history.switches_report_<сегодняшняя_дата>
+                archive_table_name = f"history.switches_report_{current_date.strftime('%Y_%m_%d')}"
+                create_archive_table_query = f"""
+                CREATE TABLE {archive_table_name} (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    canton VARCHAR(100),
+                    model VARCHAR(100),
+                    ip VARCHAR(15),
+                    switch_rank TINYINT UNSIGNED
+                );
+                """
+                await self.local_db.execute_query(create_archive_table_query)
+
+                # Копируем данные из `switches_report` в архивную таблицу
+                copy_to_archive_query = f"""
+                INSERT INTO {archive_table_name} (canton, model, ip, switch_rank)
+                SELECT canton, model, ip, switch_rank
+                FROM dbsyphon.switches_report;
+                """
+                await self.local_db.execute_query(copy_to_archive_query)
+
+                # Очищаем данные из `switches_report`
+                clear_switches_report_query = "DELETE FROM dbsyphon.switches_report;"
+                await self.local_db.execute_query(clear_switches_report_query)
+
+                # Обновляем запись в `fetch_info` с новой датой синхронизации
+                update_fetch_info_query = """
+                UPDATE dbsyphon.fetch_info 
+                SET modification_time = %s 
+                WHERE db = 'dbsyphon' AND db_table = 'switches_report';
+                """
+                await self.local_db.execute_query(update_fetch_info_query, (current_date,))
+                insert_switches_report_query = """
+                INSERT INTO dbsyphon.switches_report (canton, model, ip, switch_rank)
+                VALUES (%s, %s, %s, %s);
+                """
+
+                # Выполняем запрос к удаленной базе для получения новых данных
+                remote_query = """
+                SELECT sw.canton, sw.model, sw.ip, sw.rank
+                FROM mrtg.switches sw
+                WHERE sw.canton IN ('Минский', 'Оболонский', 'Голосеевский', 'Виноградарский', 
+                                    'Лукьяновский', 'Святошинский', 'Бощаговский', 'Теремковский') 
+                    AND sw.model NOT IN ('Контроль питания, ранг 3', 
+                                         'Контроль питания, ранг 2', 
+                                         'Контроль питания, генератор', 
+                                         'DGS-1100-06/ME R3', 
+                                         'Датчик дыма');
+                """
+                remote_data = await self.remote_db.execute_query(remote_query)
+
+                # Вставка данных в `switches_report` после очистки
+                for record in remote_data:
+                    await self.local_db.execute_query(insert_switches_report_query, record)
+
+                await self.remote_db.close()
+                return jsonify({"message": "Данные успешно обновлены в switches_report."}), 200
 
     def run(self):
         # Запуск приложения на Quart
