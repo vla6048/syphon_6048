@@ -1,3 +1,6 @@
+from calendar import month
+from email.utils import formatdate
+from IPython.core.formatters import format_display_data
 from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file, flash, Blueprint
 from quart_auth import QuartAuth, basic_auth_required
 from sqlalchemy import select, and_
@@ -15,6 +18,7 @@ import random
 import itertools
 from random import choices
 from math import floor
+import openpyxl
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -95,6 +99,115 @@ class MyApp:
 
 
     def setup_routes(self):
+
+        @self.app.route('/llc_acts/<int:act_id>/generate_bill', methods=['POST'])
+        async def generate_bill(act_id):
+            # SQL-запрос для получения данных по act_id
+            query = """
+            SELECT act.act_date, 
+                   act.act_sum, 
+                   act.id, 
+                   agr.agreement_name, 
+                   agr.agreement_date, 
+                   llc.name, 
+                   llc.edrpou, 
+                   ri.name, 
+                   ri.iban, 
+                   ri.bank_account_detail, 
+                   ri.address, 
+                   ri.phone, 
+                   ri.inn, 
+                   ri.name_short
+            FROM credentials.llc_acts act
+            JOIN credentials.llc_agreements agr ON act.agreement = agr.id
+            JOIN credentials.llc_credentials llc ON agr.llc_id = llc.id
+            JOIN credentials.ri_credentials ri ON agr.ri_id = ri.id
+            WHERE act.id = %s
+            """
+            result = await self.local_db.execute_query(query, (act_id,))
+            data = result[0] if result else {}
+
+            # Новый запрос для получения данных из llc_acts_data
+            query_acts_data = """
+            SELECT sw_rank, count_devices, worktime_float
+            FROM credentials.llc_acts_data
+            WHERE act_id = %s
+            """
+            acts_data_result = await self.local_db.execute_query(query_acts_data, (act_id,))
+
+            # Подготовка переменных для replacement
+            replacements = {
+                "@bill_name": f"B{act_id}_{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]}/{data[0].strftime('%m/%y')}_{data[3]}",
+                "@bill_date": f"{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]} {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
+                "@ri_name": data[7],
+                "@ri_iban": data[8],
+                "@bank_account_detail_ri": data[9],
+                "@ri_address": data[10],
+                "@ri_phone": data[11],
+                "@ri_inn": data[12],
+                "@llc_name": data[5],
+                "@llc_edrpou": data[6],
+                "@agr_name": data[3],
+                "@agr_date": self.format_date(data[4])[0],
+                "@bill_sum": data[1],
+                "@handwritebill_sum": self.convert_to_currency_words(data[1]),  # Конвертация числа в пропись
+                "@ri_shortname": data[13]
+            }
+
+            # Условия для замены значений из acts_data
+            if str(data[6]) == '38736443':  # Если edrpou == 38736443
+                for row in acts_data_result:
+                    if row[0] == 1:  # sw_rank == 1
+                        replacements["@rank1_count"] = row[1]
+                        replacements["@rank1_sum"] = float(row[1] * 1000)
+                        sum_rank1 = float(row[1] * 1000)
+                    elif row[0] == 2:  # sw_rank == 2
+                        replacements["@rank2_count"] = row[1]
+                        replacements["@rank2_sum"] = float(row[1] * 1000)
+                        sum_rank2 = float(row[1] * 1000)
+                    elif row[0] == 0:  # sw_rank == 0
+                        replacements["@time_count"] = round(row[2], 2)
+                        replacements["@time_sum"] = round(float(data[1]) - sum_rank2 - sum_rank1, 2)
+            else:  # Если edrpou != 38736443
+                for row in acts_data_result:
+                    if row[0] == 4:  # sw_rank == 4
+                        replacements["@rank4_count"] = row[1]
+                        replacements["@rank4_sum"] = float(row[1]*500)
+                        sum_rank4 = float(row[1]*500)
+                    elif row[0] == 3:  # sw_rank == 3
+                        replacements["@rank3_count"] = row[1]
+                        replacements["@rank3_sum"] = float(row[1]*1000)
+                        sum_rank3 = float(row[1]*1000)
+                    elif row[0] == 0:  # sw_rank == 0
+                        replacements["@time_count"] = round(row[2],2)
+                        replacements["@time_sum"] = round(float(data[1])-sum_rank4-sum_rank3, 2)
+
+
+
+            # Открываем файл шаблона
+            template_path = 'static/docs/kdn_bill.xlsx' if str(data[6]) == '38736443' else 'static/docs/llc_bill.xlsx'
+            workbook = openpyxl.load_workbook(template_path)
+            sheet = workbook.active
+
+            # Замена меток на соответствующие значения
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        # Проверяем наличие и заменяем все метки внутри текста ячейки
+                        for key, replacement in replacements.items():
+                            replacement = str(replacement)
+                            if key in cell.value:
+                                cell.value = cell.value.replace(key, replacement)
+
+            # Сохраняем измененный файл в памяти
+            output = BytesIO()
+            workbook.save(output)
+            output.seek(0)
+            xlxs_name = f'{data[3]}_Рахунок_{self.format_date(data[0])[1]}_{self.format_date(data[0])[2]}'
+
+            # Отправляем файл для скачивания
+            return await send_file(output, as_attachment=True, attachment_filename=f"{xlxs_name}.xlsx",
+                                   mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         @self.app.route('/llc_acts/<int:agreement_id>/generate_data/<int:act_id>', methods=['POST'])
         # @basic_auth_required()
@@ -264,9 +377,6 @@ class MyApp:
             print(f"Настройка оборудования ранга 4 {str(rank4_report)}")
             print(f"Консультация по работе оборудования {str(consultation_report)}")
 
-        from itertools import cycle
-        import random
-        from math import floor
 
         async def handle_kdn_logic(act_date, act_sum, agreement, ri_id, act_id):
             # Установленная цена за единицу оборудования или времени консультаций

@@ -50,12 +50,13 @@
                         <td>{{ act.act_date.strftime('%B %Y') }}</td>
                         <td>{{ act.act_sum }}</td>
                         <td>
-                            <form action="/llc_acts/{{ agreement_id }}/generate_data/{{ act.id }}" method="POST" style="display: inline;">
                                 <button type="submit" class="btn btn-warning" {% if act.has_data %}disabled{% endif %}>Сгенерировать данные</button>
                             </form>
                         </td>
                         <td>
-                            <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>Рахунок</button>
+                                <form action="{{ url_for('generate_bill', act_id=act.id) }}" method="post" style="display:inline;">
+                                <button type="submit" class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>Рахунок</button>
+                                </form>
                         </td>
                         <td>
                             <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>АКТ</button>
