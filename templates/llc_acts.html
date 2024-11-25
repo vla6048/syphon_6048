@@ -50,6 +50,7 @@
                         <td>{{ act.act_date.strftime('%B %Y') }}</td>
                         <td>{{ act.act_sum }}</td>
                         <td>
+                               <form action="{{ url_for('generate_act_data', agreement_id=agreement_id, act_id=act.id) }}" method="post" style="display:inline;">
                                 <button type="submit" class="btn btn-warning" {% if act.has_data %}disabled{% endif %}>Сгенерировать данные</button>
                             </form>
                         </td>
