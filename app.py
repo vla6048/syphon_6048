@@ -1,10 +1,9 @@
-from calendar import month
-from email.utils import formatdate
-from IPython.core.formatters import format_display_data
 from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file, flash, Blueprint
 from quart_auth import QuartAuth, basic_auth_required
-from sqlalchemy import select, and_
 from docx import Document
+from docx.shared import Pt
+from docx.oxml.ns import qn
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from dotenv import load_dotenv
 from num2words import num2words
 from datetime import date, datetime
@@ -12,11 +11,8 @@ import os
 import calendar
 from io import BytesIO
 import pandas as pd
-import pdb
 from db_manager import DatabaseManager
 import random
-import itertools
-from random import choices
 from math import floor
 import openpyxl
 
@@ -74,6 +70,12 @@ class MyApp:
                     if cell.tables:
                         self.replace_in_tables(cell.tables, replacements)
 
+    def formatting_text(self, document):
+        for paragraph in document.paragraphs:
+            for run in paragraph.runs:
+                run.font.name = 'Times New Roman'
+                run.font.size = Pt(11)
+
     def convert_to_currency_words(self, amount):
         hryvnia_part = int(amount)
         kopiyka_part = int(round((amount - hryvnia_part) * 100))
@@ -99,6 +101,249 @@ class MyApp:
 
 
     def setup_routes(self):
+
+        @self.app.route('/llc_acts/<int:act_id>/generate_report_llc', methods=['POST'])
+        async def generate_report_llc(act_id):
+            # SQL-запрос для получения данных по act_id
+            query = """
+                    SELECT act.act_date, 
+                           act.act_sum, 
+                           act.id, 
+                           agr.agreement_name, 
+                           agr.agreement_date, 
+                           llc.name, 
+                           llc.edrpou, 
+                           ri.name, 
+                           ri.iban, 
+                           ri.bank_account_detail, 
+                           ri.address, 
+                           ri.phone, 
+                           ri.inn, 
+                           ri.name_short,
+                           llc.in_persona,
+                           ri.pidstava,
+                           llc.address,
+                           llc.iban,
+                           llc.bank_account_detail,
+                           llc.inn,
+                           llc.name_short
+                    FROM credentials.llc_acts act
+                    JOIN credentials.llc_agreements agr ON act.agreement = agr.id
+                    JOIN credentials.llc_credentials llc ON agr.llc_id = llc.id
+                    JOIN credentials.ri_credentials ri ON agr.ri_id = ri.id
+                    WHERE act.id = %s
+                    """
+            result = await self.local_db.execute_query(query, (act_id,))
+            data = result[0] if result else {}
+
+            # Новый запрос для получения данных из llc_acts_data
+            query_acts_data = """
+                    SELECT sw_rank, model_list, count_devices, ip_list, worktime_float
+                    FROM credentials.llc_acts_data
+                    WHERE act_id = %s
+                    """
+            acts_data_result = await self.local_db.execute_query(query_acts_data, (act_id,))
+
+            # Подготовка данных для замены
+            replacements = {
+                "@act_name": f"R{act_id}_{data[0].strftime('%m/%y')}_{data[3]}",
+                "@act_date": f"«{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]}» {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
+                "@ri_name": data[7],
+                "@ri_iban": data[8],
+                "@bank_account_detail_ri": data[9],
+                "@ri_address": data[10],
+                "@ri_phone": data[11],
+                "@ri_inn": data[12],
+                "@llc_name": data[5],
+                "@llc_edrpou": data[6],
+                "@agr_name": data[3],
+                "@agr_date": self.format_date(data[4])[0],
+                "@act_sum": data[1],
+                "@actsumwords": self.convert_to_currency_words(data[1]),  # Конвертация числа в пропись
+                "@ri_shortname": data[13],
+                "@llc_in_persona": data[14],
+                "@ri_pidstava": data[15],
+                "@current_month": self.format_date(data[0])[1],
+                "@current_year": self.format_date(data[0])[2],
+                "@last_day_of_the_month": calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1],
+                "@llc_address": data[16],
+                "@llc_iban": data[17],
+                "@bank_account_detail_llc": data[18],
+                "@llc_inn": data[19],
+                "@llc_shortname": data[20]
+            }
+
+            # Условия для замены значений из acts_data
+            if str(data[6]) == '38736443':  # Если edrpou == 38736443
+                for row in acts_data_result:
+                    if row[0] == 1:  # sw_rank == 1
+                        replacements["@rank1_models"] = row[1]
+                        replacements["@rank1_count"] = row[2]
+                        replacements["@rank1_ips"] = row[3]
+                    elif row[0] == 2:  # sw_rank == 2
+                        replacements["@rank2_models"] = row[1]
+                        replacements["@rank2_count"] = row[2]
+                        replacements["@rank2_ips"] = row[3]
+                    elif row[0] == 0:  # sw_rank == 0
+                        replacements["@time_models"] = row[1]
+                        replacements["@time_count"] = round(row[4], 2)
+                        replacements["@time_ips"] = row[3]
+            else:  # Если edrpou != 38736443
+                for row in acts_data_result:
+                    if row[0] == 4:  # sw_rank == 4
+                        replacements["@rank4_models"] = row[1]
+                        replacements["@rank4_count"] = row[2]
+                        replacements["@rank4_ips"] = row[3]
+                    elif row[0] == 3:  # sw_rank == 3
+                        replacements["@rank3_models"] = row[1]
+                        replacements["@rank3_count"] = row[2]
+                        replacements["@rank3_ips"] = row[3]
+                    elif row[0] == 0:  # sw_rank == 0
+                        replacements["@time_models"] = row[1]
+                        replacements["@time_count"] = round(row[4], 2)
+                        replacements["@time_ips"] = row[3]
+
+            # Проверка `llc_edrpou` и выбор пути к шаблону
+            template_path = 'static/docs/kdn_report.docx' if str(data[6]) == '38736443' else 'static/docs/llc_report.docx'
+
+            # Открываем шаблон документа Word
+            document = Document(template_path)
+
+            # Замена меток на соответствующие значения в тексте документа
+            self.replace_text_in_document(document, replacements)
+            self.replace_in_tables(document.tables, replacements)
+            self.formatting_text(document)
+
+            # Сохраняем измененный файл в памяти
+            output = BytesIO()
+            document.save(output)
+            output.seek(0)
+            docx_name = f'{data[3]}_Звіт_{self.format_date(data[0])[1]}_{self.format_date(data[0])[2]}'
+
+            # Отправляем файл для скачивания
+            return await send_file(output, as_attachment=True, attachment_filename=f"{docx_name}.docx")
+
+        @self.app.route('/llc_acts/<int:act_id>/generate_act', methods=['POST'])
+        async def generate_act(act_id):
+            # SQL-запрос для получения данных по act_id
+            query = """
+            SELECT act.act_date, 
+                   act.act_sum, 
+                   act.id, 
+                   agr.agreement_name, 
+                   agr.agreement_date, 
+                   llc.name, 
+                   llc.edrpou, 
+                   ri.name, 
+                   ri.iban, 
+                   ri.bank_account_detail, 
+                   ri.address, 
+                   ri.phone, 
+                   ri.inn, 
+                   ri.name_short,
+                   llc.in_persona,
+                   ri.pidstava,
+                   llc.address,
+                   llc.iban,
+                   llc.bank_account_detail,
+                   llc.inn,
+                   llc.name_short
+            FROM credentials.llc_acts act
+            JOIN credentials.llc_agreements agr ON act.agreement = agr.id
+            JOIN credentials.llc_credentials llc ON agr.llc_id = llc.id
+            JOIN credentials.ri_credentials ri ON agr.ri_id = ri.id
+            WHERE act.id = %s
+            """
+            result = await self.local_db.execute_query(query, (act_id,))
+            data = result[0] if result else {}
+
+            # Новый запрос для получения данных из llc_acts_data
+            query_acts_data = """
+                    SELECT sw_rank, count_devices, worktime_float
+                    FROM credentials.llc_acts_data
+                    WHERE act_id = %s
+                    """
+            acts_data_result = await self.local_db.execute_query(query_acts_data, (act_id,))
+
+
+            # Подготовка данных для замены
+            replacements = {
+                "@act_name": f"A{act_id}_{data[0].strftime('%m/%y')}_{data[3]}",
+                "@act_date": f"«{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]}» {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
+                "@ri_name": data[7],
+                "@ri_iban": data[8],
+                "@bank_account_detail_ri": data[9],
+                "@ri_address": data[10],
+                "@ri_phone": data[11],
+                "@ri_inn": data[12],
+                "@llc_name": data[5],
+                "@llc_edrpou": data[6],
+                "@agr_name": data[3],
+                "@agr_date": self.format_date(data[4])[0],
+                "@act_sum": data[1],
+                "@actsumwords": self.convert_to_currency_words(data[1]),  # Конвертация числа в пропись
+                "@ri_shortname": data[13],
+                "@llc_in_persona": data[14],
+                "@ri_pidstava": data[15],
+                "@current_month": self.format_date(data[0])[1],
+                "@current_year": self.format_date(data[0])[2],
+                "@last_day_of_the_month": calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1],
+                "@llc_address": data[16],
+                "@llc_iban": data[17],
+                "@bank_account_detail_llc": data[18],
+                "@llc_inn": data[19],
+                "@llc_shortname": data[20]
+            }
+
+            # Условия для замены значений из acts_data
+            if str(data[6]) == '38736443':  # Если edrpou == 38736443
+                for row in acts_data_result:
+                    if row[0] == 1:  # sw_rank == 1
+                        replacements["@rank1_count"] = row[1]
+                        replacements["@rank1_sum"] = float(row[1] * 1000)
+                        sum_rank1 = float(row[1] * 1000)
+                    elif row[0] == 2:  # sw_rank == 2
+                        replacements["@rank2_count"] = row[1]
+                        replacements["@rank2_sum"] = float(row[1] * 1000)
+                        sum_rank2 = float(row[1] * 1000)
+                    elif row[0] == 0:  # sw_rank == 0
+                        replacements["@time_count"] = round(row[2], 2)
+                        replacements["@time_sum"] = round(float(data[1]) - sum_rank2 - sum_rank1, 2)
+            else:  # Если edrpou != 38736443
+                for row in acts_data_result:
+                    if row[0] == 4:  # sw_rank == 4
+                        replacements["@rank4_count"] = row[1]
+                        replacements["@rank4_sum"] = float(row[1] * 500)
+                        sum_rank4 = float(row[1] * 500)
+                    elif row[0] == 3:  # sw_rank == 3
+                        replacements["@rank3_count"] = row[1]
+                        replacements["@rank3_sum"] = float(row[1] * 1000)
+                        sum_rank3 = float(row[1] * 1000)
+                    elif row[0] == 0:  # sw_rank == 0
+                        replacements["@time_count"] = round(row[2], 2)
+                        replacements["@time_sum"] = round(float(data[1]) - sum_rank4 - sum_rank3, 2)
+
+
+            # Проверка `llc_edrpou` и выбор пути к шаблону
+            template_path = 'static/docs/kdn_act.docx' if str(data[6]) == '38736443' else 'static/docs/llc_act.docx'
+
+            # Открываем шаблон документа Word
+            document = Document(template_path)
+
+            # Замена меток на соответствующие значения в тексте документа
+            self.replace_text_in_document(document, replacements)
+            self.replace_in_tables(document.tables, replacements)
+            self.formatting_text(document)
+
+            # Сохраняем измененный файл в памяти
+            output = BytesIO()
+            document.save(output)
+            output.seek(0)
+            docx_name = f'{data[3]}_Акт_{self.format_date(data[0])[1]}_{self.format_date(data[0])[2]}'
+
+            # Отправляем файл для скачивания
+            return await send_file(output, as_attachment=True, attachment_filename=f"{docx_name}.docx",
+                                   mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
         @self.app.route('/llc_acts/<int:act_id>/generate_bill', methods=['POST'])
         async def generate_bill(act_id):
@@ -137,7 +382,7 @@ class MyApp:
 
             # Подготовка переменных для replacement
             replacements = {
-                "@bill_name": f"B{act_id}_{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]}/{data[0].strftime('%m/%y')}_{data[3]}",
+                "@bill_name": f"B{act_id}_{data[0].strftime('%m/%y')}_{data[3]}",
                 "@bill_date": f"{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]} {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
                 "@ri_name": data[7],
                 "@ri_iban": data[8],

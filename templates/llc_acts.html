@@ -59,10 +59,14 @@
                                 </form>
                         </td>
                         <td>
-                            <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>АКТ</button>
+                                <form action="{{ url_for('generate_act', act_id=act.id) }}" method="post" style="display:inline;">
+                                <button type="submit" class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>АКТ</button>
+                                </form>
                         </td>
                         <td>
-                            <button class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>ЗВІТ</button>
+                            <form action="{{ url_for('generate_report_llc', act_id=act.id) }}" method="post" style="display:inline;">
+                                <button type="submit" class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>ЗВІТ</button>
+                                </form>
                         </td>
                         <td>
                             <form action="{{ url_for('delete_act', agreement_id=agreement_id, act_id=act.id) }}" method="post" style="display:inline;">
