@@ -879,15 +879,19 @@ class MyApp:
             acts_data = await self.local_db.execute_query(acts_query, (agreement_id,))
 
             # Проверка данных в таблице llc_acts_data
-            acts_with_data_query = """
-            SELECT act_id FROM credentials.llc_acts_data WHERE act_id IN (%s);
-            """
-            act_ids = [act[0] for act in acts_data]
-            acts_with_data = await self.local_db.execute_query(
-                acts_with_data_query,
-                (','.join(map(str, act_ids)),)
-            )
-            acts_with_data_ids = {row[0] for row in acts_with_data}
+            if acts_data:
+                act_ids = [act[0] for act in acts_data]
+                acts_with_data_query = """
+                SELECT DISTINCT act_id FROM credentials.llc_acts_data WHERE act_id IN (%s);
+                """
+                # Генерация списка идентификаторов для подстановки в запрос
+                in_clause = ','.join(['%s'] * len(act_ids))
+                acts_with_data_query = acts_with_data_query % in_clause
+
+                acts_with_data = await self.local_db.execute_query(acts_with_data_query, tuple(act_ids))
+                acts_with_data_ids = {row[0] for row in acts_with_data}
+            else:
+                acts_with_data_ids = set()
 
             # Преобразование данных о актах в список словарей
             acts = [
