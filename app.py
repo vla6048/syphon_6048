@@ -1293,6 +1293,7 @@ class MyApp:
             # Замена текста в шаблоне
             self.replace_text_in_document(doc, replacements)
             self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
 
 
             # Сохранение документа в память
@@ -1338,7 +1339,7 @@ class MyApp:
             proto_date_str, proto_month_ukr_name, proto_year, last_day_of_the_month = self.format_date(protocol[0])
             template_month = calendar.monthrange(int(protocol[0].strftime("%Y")), int(protocol[0].month))
             last_day_of_the_month = str(template_month[1])
-
+            act_date = f"{last_day_of_the_month} {proto_month_ukr_name} {proto_year} року "
             # Загрузка шаблона
             template_path = 'static/docs/M-RI_act.docx'
             doc = Document(template_path)
@@ -1367,7 +1368,7 @@ class MyApp:
                 '@ri_iban': agreement[13],
                 '@bank_account_detail_ri': agreement[14],
                 '@riname_short': agreement[15],
-                '@today': self.format_date(date.today())[0],
+                '@today': act_date,
                 '@act_nubmer': f'{protocol_id}/{agreement[0]}',
                 '@act_hours': self.amount_to_time(float(protocol[1]))
             }
@@ -1376,6 +1377,7 @@ class MyApp:
             print(self.amount_to_time(float(protocol[1])))
             self.replace_text_in_document(doc, replacements)
             self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
 
 
             # Сохранение документа в память
