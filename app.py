@@ -1129,7 +1129,7 @@ class MyApp:
                         proto_sum_caps = self.convert_to_currency_words(fop_change)
 
                         insert_protocol_query = """
-                            INSERT INTO credentials.protocols_test (agreement, proto_date, proto_sum, proto_sum_caps)
+                            INSERT INTO credentials.protocols (agreement, proto_date, proto_sum, proto_sum_caps)
                             VALUES (%s, %s, %s, %s);
                         """
                         await self.local_db.execute_query(insert_protocol_query,
