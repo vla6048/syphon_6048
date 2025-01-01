@@ -915,7 +915,8 @@ class MyApp:
             SELECT la.id, la.agreement_name, la.agreement_date, llc.name AS llc_name, llc.canton AS canton, ri.name AS engineer_name
             FROM credentials.llc_agreements la
             JOIN credentials.llc_credentials llc ON la.llc_id = llc.id
-            JOIN credentials.ri_credentials ri ON la.ri_id = ri.id;
+            JOIN credentials.ri_credentials ri ON la.ri_id = ri.id
+            WHERE la.agreement_state = 1;
             """
 
             # Выполняем запрос и получаем данные по договорам
@@ -1468,16 +1469,31 @@ class MyApp:
         @self.app.route('/agreements', methods=['GET'])
         @basic_auth_required()
         async def agreements():
+
+            # Получаем выбранный фильтр из параметров запроса
+            selected_engineer = request.args.get('engineer_filter', '')
+
+            # SQL-запрос для получения всех инженеров
+            engineers_query = "SELECT DISTINCT name FROM credentials.ri_credentials;"
+            engineers_data = await self.local_db.execute_query(engineers_query)
+            engineers = [row[0] for row in engineers_data]
+
             # SQL-запрос для получения информации о всех договорах
             query = """
-            SELECT a.id, a.agreement_name, fc.name AS master_name, rc.name AS engineer_name
+            SELECT a.id, a.agreement_name, fc.name AS master_name, rc.name AS engineer_name, a.agreement_state
             FROM credentials.agreements a
             JOIN credentials.fop_credentials fc ON a.master_id = fc.id
-            JOIN credentials.ri_credentials rc ON a.ri_id = rc.id;
+            JOIN credentials.ri_credentials rc ON a.ri_id = rc.id
             """
 
-            # Выполняем запрос и получаем данные по договорам
-            agreements_data = await self.local_db.execute_query(query)
+            if selected_engineer:
+                query += " WHERE rc.name = %s"
+                agreements_data = await self.local_db.execute_query(query, (selected_engineer,))
+            else:
+                agreements_data = await self.local_db.execute_query(query)
+
+            # # Выполняем запрос и получаем данные по договорам
+            # agreements_data = await self.local_db.execute_query(query)
 
             all_years = set()
             agreements_list = []
@@ -1489,6 +1505,7 @@ class MyApp:
                     'agreement_name': agreement[1],
                     'master_name': agreement[2],
                     'engineer_name': agreement[3],
+                    'agreement_state': agreement[4],
                     'protocols_by_year': {}
                 }
 
@@ -1512,7 +1529,13 @@ class MyApp:
                 agreements_list.append(agreement_dict)
 
             # Передаем все данные в шаблон, включая все уникальные годы
-            return await render_template('agreements.html', agreements=agreements_list, all_years=sorted(all_years))
+            return await render_template(
+                'agreements.html',
+                agreements=agreements_list,
+                all_years=sorted(all_years),
+                engineers=engineers,
+                selected_engineer=selected_engineer
+            )
 
         @self.app.route('/fop-form')
         @basic_auth_required()
