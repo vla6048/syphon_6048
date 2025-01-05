@@ -1392,6 +1392,24 @@ class MyApp:
             # Отправка документа клиенту
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
+        @self.app.route('/agreement_detail/<int:agreement_id>', methods=['GET'])
+        @basic_auth_required()
+        async def agreement_detail(agreement_id):
+            # Здесь вы можете выполнить SQL-запрос для получения данных договора
+            # Например:
+            # query = "SELECT * FROM agreements WHERE id = %s"
+            # agreement = await db.execute(query, (agreement_id,))
+
+            # Заглушка данных для примера
+            agreement = {
+                "id": agreement_id,
+                "name": "Sample Agreement",
+                "date": "2025-01-01",
+                "description": "This is a sample agreement description."
+            }
+
+            return await render_template('agreement_detail.html', agreement=agreement)
+
         @self.app.route('/protocols/<int:agreement_id>', methods=['GET', 'POST'])
         @basic_auth_required()
         async def protocols(agreement_id):
@@ -1438,7 +1456,7 @@ class MyApp:
 
             # Запрос данных о договоре
             agreement_query = """
-            SELECT a.agreement_name, f.name AS master_name, r.name AS ri_name, a.id
+            SELECT a.agreement_name, f.name AS master_name, r.name AS ri_name, a.id, f.email
             FROM credentials.agreements AS a
             JOIN credentials.fop_credentials AS f ON a.master_id = f.id
             JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
@@ -1833,7 +1851,7 @@ class MyApp:
 
                 # Выполняем запрос к удаленной базе для получения всех нужных данных
                 remote_query = """
-                SELECT sw.canton, sw.model, sw.ip, sw.rank
+                SELECT sw.canton, sw.model, sw.ip, sw.rank, sw.vetka
                 FROM mrtg.switches sw
                 WHERE sw.canton IN ('Минский', 'Оболонский', 'Голосеевский', 'Виноградарский', 
                                     'Лукьяновский', 'Святошинский', 'Борщаговский', 'Теремковский') 
@@ -1847,8 +1865,8 @@ class MyApp:
 
                 # Вставка данных в локальную таблицу `switches_report`
                 insert_switches_report_query = """
-                INSERT INTO dbsyphon.switches_report (canton, model, ip, switch_rank)
-                VALUES (%s, %s, %s, %s);
+                INSERT INTO dbsyphon.switches_report (canton, model, ip, switch_rank, vetka)
+                VALUES (%s, %s, %s, %s, %s);
                 """
                 for record in remote_data:
                     await self.local_db.execute_query(insert_switches_report_query, record)
@@ -1874,15 +1892,16 @@ class MyApp:
                     canton VARCHAR(100),
                     model VARCHAR(100),
                     ip VARCHAR(15),
-                    switch_rank TINYINT UNSIGNED
+                    switch_rank TINYINT UNSIGNED,
+                    vetka INT
                 );
                 """
                 await self.local_db.execute_query(create_archive_table_query)
 
                 # Копируем данные из `switches_report` в архивную таблицу
                 copy_to_archive_query = f"""
-                INSERT INTO {archive_table_name} (canton, model, ip, switch_rank)
-                SELECT canton, model, ip, switch_rank
+                INSERT INTO {archive_table_name} (canton, model, ip, switch_rank, vetka)
+                SELECT canton, model, ip, switch_rank, vetka
                 FROM dbsyphon.switches_report;
                 """
                 await self.local_db.execute_query(copy_to_archive_query)
@@ -1899,13 +1918,13 @@ class MyApp:
                 """
                 await self.local_db.execute_query(update_fetch_info_query, (current_date,))
                 insert_switches_report_query = """
-                INSERT INTO dbsyphon.switches_report (canton, model, ip, switch_rank)
-                VALUES (%s, %s, %s, %s);
+                INSERT INTO dbsyphon.switches_report (canton, model, ip, switch_rank, vetka)
+                VALUES (%s, %s, %s, %s, %s);
                 """
 
                 # Выполняем запрос к удаленной базе для получения новых данных
                 remote_query = """
-                SELECT sw.canton, sw.model, sw.ip, sw.rank
+                SELECT sw.canton, sw.model, sw.ip, sw.rank, sw.vetka
                 FROM mrtg.switches sw
                 WHERE sw.canton IN ('Минский', 'Оболонский', 'Голосеевский', 'Виноградарский', 
                                     'Лукьяновский', 'Святошинский', 'Борщаговский', 'Теремковский') 
@@ -1919,6 +1938,7 @@ class MyApp:
 
                 # Вставка данных в `switches_report` после очистки
                 for record in remote_data:
+                    print(record)
                     await self.local_db.execute_query(insert_switches_report_query, record)
 
                 await self.remote_db.close()

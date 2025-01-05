@@ -25,9 +25,28 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="mb-4">Протоколы по договору: {{ agreement[0] }}</h1>
-        <h3 class="mb-4">Мастер: {{ agreement[1] }}</h3>
-        <h3 class="mb-4">Инженер: {{ agreement[2] }}</h3>
+                <h3 class="mb-4">
+            Договор:
+            <a href="{{ url_for('agreement_detail', agreement_id=agreement_id) }}"
+               style="text-decoration: underline; color: blue;">
+                {{ agreement[0] }}
+            </a>
+        </h3>
+<h3 class="mb-4">Мастер: {{ agreement[1] }}</h3>
+<h3 class="mb-4">Инженер: {{ agreement[2] }}</h3>
+        {% if agreement[4] %}
+            <h3 class="mb-4">
+                Email:
+                <span
+                    id="email"
+                    style="cursor: pointer; text-decoration: underline; color: blue;"
+                    onclick="copyToClipboard('{{ agreement[4] }}')"
+                >
+                    {{ agreement[4] }}
+                </span>
+                <small id="copyMessage" style="display: none; color: green; margin-left: 10px;">Скопировано!</small>
+            </h3>
+        {% endif %}
 
         {% if protocols %}
         <div class="table-responsive">
@@ -97,6 +116,28 @@
             var inputField = document.getElementById('proto_sum');
             inputField.value = inputField.value.replace(',', '.');
         }
+        function copyToClipboard(email) {
+        // Создаем временное текстовое поле
+        const tempInput = document.createElement("input");
+        tempInput.value = email;
+        document.body.appendChild(tempInput);
+
+        // Копируем значение в буфер обмена
+        tempInput.select();
+        document.execCommand("copy");
+
+        // Удаляем временное текстовое поле
+        document.body.removeChild(tempInput);
+
+        // Отображаем сообщение об успешном копировании
+        const copyMessage = document.getElementById("copyMessage");
+        copyMessage.style.display = "inline";
+
+        // Скрываем сообщение через 2 секунды
+        setTimeout(() => {
+            copyMessage.style.display = "none";
+        }, 2000);
+    }
     </script>
 </body>
 </html>
