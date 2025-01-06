@@ -1392,21 +1392,62 @@ class MyApp:
             # Отправка документа клиенту
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
-        @self.app.route('/agreement_detail/<int:agreement_id>', methods=['GET'])
+        @self.app.route('/agreement_detail/<int:agreement_id>', methods=['GET', 'POST'])
         @basic_auth_required()
         async def agreement_detail(agreement_id):
-            # Здесь вы можете выполнить SQL-запрос для получения данных договора
-            # Например:
-            # query = "SELECT * FROM agreements WHERE id = %s"
-            # agreement = await db.execute(query, (agreement_id,))
+            # SQL-запрос для получения данных договора
+            query = """
+            SELECT 
+                a.agreement_name, 
+                a.agreement_date, 
+                f.name AS master_name, 
+                f.inn AS master_inn, 
+                r.name AS ri_name, 
+                r.inn AS ri_inn, 
+                t.canton, 
+                GROUP_CONCAT(t.vetka ORDER BY t.vetka SEPARATOR ', ') AS vetkas
+            FROM 
+                credentials.agreements a
+            JOIN 
+                credentials.fop_credentials f ON a.master_id = f.id
+            JOIN 
+                credentials.ri_credentials r ON a.ri_id = r.id
+            JOIN 
+                credentials.fop_territory t ON a.master_id = t.master_id
+            WHERE 
+                a.id = %s
+            GROUP BY 
+                a.agreement_name, 
+                a.agreement_date, 
+                f.name, 
+                f.inn, 
+                r.name, 
+                r.inn, 
+                t.canton;
+            """
 
-            # Заглушка данных для примера
+            # Получение данных из базы
+            agreement_data = await self.local_db.execute_query(query, (agreement_id,))
+            if not agreement_data:
+                return "Договор не найден.", 404
+
+            # Преобразование результата в словарь (aiomysql.DictCursor не используется)
             agreement = {
-                "id": agreement_id,
-                "name": "Sample Agreement",
-                "date": "2025-01-01",
-                "description": "This is a sample agreement description."
+                "agreement_name": agreement_data[0][0],
+                "agreement_date": agreement_data[0][1],
+                "master_name": agreement_data[0][2],
+                "master_inn": agreement_data[0][3],
+                "ri_name": agreement_data[0][4],
+                "ri_inn": agreement_data[0][5],
+                "canton": agreement_data[0][6],
+                "vetkas": agreement_data[0][7],
             }
+
+            # Обработка POST-запроса для "Расторжения"
+            if request.method == 'POST':
+                termination_date = (await request.form).get('termination_date')
+                # Здесь можно добавить логику сохранения расторжения
+                return redirect(url_for('agreement_detail', agreement_id=agreement_id))
 
             return await render_template('agreement_detail.html', agreement=agreement)
 
