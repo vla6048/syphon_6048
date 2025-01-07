@@ -3,7 +3,7 @@ from quart_auth import QuartAuth, basic_auth_required
 from docx import Document
 from docx.shared import Pt
 from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.enum.table import WD_ALIGN_VERTICAL
 from dotenv import load_dotenv
 from num2words import num2words
 from datetime import date, datetime
@@ -98,6 +98,36 @@ class MyApp:
         hours = int(work_hours)
         minutes = int((work_hours-hours)*60)
         return f"{hours} годин {minutes} хвилин"
+
+    def create_table(self, doc, data, headers):
+        # Добавление таблицы в документ
+        table = doc.add_table(rows=1, cols=len(headers))
+
+        # Добавление заголовков в таблицу
+        hdr_cells = table.rows[0].cells
+        for idx, header in enumerate(headers):
+            hdr_cells[idx].text = header
+
+        # Добавление данных в таблицу
+        for idx, row in enumerate(data):
+            row_cells = table.add_row().cells
+            for j, val in enumerate(row):
+                row_cells[j].text = str(val)
+
+        return table
+
+    def replace_table_in_document(self, doc, marker, table):
+        # Проходим по всем параграфам документа
+        for paragraph in doc.paragraphs:
+            if marker in paragraph.text:
+                # Удаляем маркер
+                paragraph.clear()
+
+                # Вставляем таблицу в место маркера
+                table_element = table._element
+                paragraph._element.addnext(table_element)  # Вставляем таблицу после параграфа
+                break
+        return doc
 
 
     def setup_routes(self):
@@ -1395,7 +1425,7 @@ class MyApp:
         @self.app.route('/agreement_detail/<int:agreement_id>', methods=['GET', 'POST'])
         @basic_auth_required()
         async def agreement_detail(agreement_id):
-            # SQL-запрос для получения данных договора
+            # Новый SQL-запрос
             query = """
             SELECT 
                 a.agreement_name, 
@@ -1404,7 +1434,9 @@ class MyApp:
                 f.inn AS master_inn, 
                 r.name AS ri_name, 
                 r.inn AS ri_inn, 
-                t.canton, 
+                t.canton,
+                a.agreement_state,
+                COALESCE(MAX(term.termination_date), 'Нет данных') AS termination_date,
                 GROUP_CONCAT(t.vetka ORDER BY t.vetka SEPARATOR ', ') AS vetkas
             FROM 
                 credentials.agreements a
@@ -1414,6 +1446,8 @@ class MyApp:
                 credentials.ri_credentials r ON a.ri_id = r.id
             JOIN 
                 credentials.fop_territory t ON a.master_id = t.master_id
+            LEFT JOIN 
+                credentials.agreement_termination term ON a.id = term.agreement_id
             WHERE 
                 a.id = %s
             GROUP BY 
@@ -1431,7 +1465,7 @@ class MyApp:
             if not agreement_data:
                 return "Договор не найден.", 404
 
-            # Преобразование результата в словарь (aiomysql.DictCursor не используется)
+            # Преобразование результата в словарь
             agreement = {
                 "agreement_name": agreement_data[0][0],
                 "agreement_date": agreement_data[0][1],
@@ -1440,16 +1474,201 @@ class MyApp:
                 "ri_name": agreement_data[0][4],
                 "ri_inn": agreement_data[0][5],
                 "canton": agreement_data[0][6],
-                "vetkas": agreement_data[0][7],
+                "agreement_state": agreement_data[0][7],
+                "termination_date": agreement_data[0][8],
+                "vetkas": agreement_data[0][9],
+                "agreement_id": agreement_id,
             }
 
             # Обработка POST-запроса для "Расторжения"
             if request.method == 'POST':
                 termination_date = (await request.form).get('termination_date')
-                # Здесь можно добавить логику сохранения расторжения
+                # Логика сохранения расторжения, например, обновление базы
                 return redirect(url_for('agreement_detail', agreement_id=agreement_id))
 
             return await render_template('agreement_detail.html', agreement=agreement)
+
+        @self.app.route('/generate_contract/<int:agreement_id>', methods=['GET'])
+        @basic_auth_required()
+        async def generate_contract(agreement_id):
+            # Запрос на получение данных о договоре
+            agreement_query = """
+            SELECT a.agreement_name, a.agreement_date, f.name AS fop_name, f.inn AS inn_fop, f.pidstava AS pidstava_fop, 
+                   f.address AS fop_address, f.iban AS fop_iban, f.bank_account_detail AS bank_account_detail_fop, f.name_short AS fop_name_short,
+                   r.name AS ri_name, r.inn AS inn_ri, r.pidstava AS pidstava_ri, r.address AS ri_address, r.iban AS ri_iban, r.bank_account_detail AS bank_account_detail_ri, r.name_short AS ri_name_short,
+                   a.agreement_state
+            FROM credentials.agreements AS a
+            JOIN credentials.fop_credentials AS f ON a.master_id = f.id
+            JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
+            WHERE a.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+            agreement = agreement_data[0] # Мы получаем первый элемент, чтобы передать данные как строку, а не кортеж.
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            # Преобразуем данные и форматируем дату
+            agreement_date_str, month_ukr_name, year, _ = self.format_date(agreement[1])
+
+            # Загрузка шаблона договора
+            template_path = 'static/docs/M-RI_agreement.docx'
+            doc = Document(template_path)
+
+            # Замена маркеров
+            replacements = {
+                '@agr_num': agreement[0],
+                '@agr_date': agreement_date_str,
+                '@fop_name': agreement[2],
+                '@inn_fop': agreement[3],
+                '@pidstava_fop': agreement[4],
+                '@ri_name': agreement[9],
+                '@inn_ri': agreement[10],
+                '@pidstava_ri': agreement[11],
+                '@fop_address': agreement[5],
+                '@fop_iban': agreement[6],
+                '@bank_account_detail_fop': agreement[7],
+                '@fopname_short': agreement[8],
+                '@ri_address': agreement[12],
+                '@ri_iban': agreement[13],
+                '@bank_account_detail_ri': agreement[14],
+                '@riname_short': agreement[15],
+                '@agreement_state': 'Активный' if agreement[16] == 1 else 'Неактивный'  # Активный договор или нет
+            }
+
+            # Замена текста в шаблоне
+            self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
+
+            # Сохранение документа в память
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
+
+            # Формируем название файла
+            file_name = f"{agreement[0]}_ДОГОВІР.docx"
+
+            # Отправка документа клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
+
+        @self.app.route('/generate_dod1/<int:agreement_id>', methods=['GET'])
+        @basic_auth_required()
+        async def generate_dod1(agreement_id):
+            # Запросы для получения данных
+            query1 = """
+            SELECT 
+                sr.model, 
+                COUNT(DISTINCT sr.ip) AS ip_count
+            FROM 
+                dbsyphon.switches_report sr
+            JOIN 
+                credentials.fop_territory ft ON sr.vetka = ft.vetka
+            JOIN 
+                credentials.agreements a ON a.master_id = ft.master_id
+            WHERE
+                sr.switch_rank = 4
+            AND
+                a.id = %s
+            GROUP BY 
+                sr.model;
+            """
+
+            query2 = """
+            SELECT 
+                CONCAT(SUBSTRING_INDEX(sr.ip, '.', 3), '.0/24') AS ip_pool
+            FROM 
+                dbsyphon.switches_report sr
+            JOIN 
+                credentials.fop_territory ft ON sr.vetka = ft.vetka
+            JOIN 
+                credentials.agreements a ON a.master_id = ft.master_id
+            WHERE
+                sr.switch_rank = 4
+            AND
+                a.id = %s
+            GROUP BY 
+                ip_pool;
+            """
+
+            # Выполнение запросов и получение данных
+            data_table1 = await self.local_db.execute_query(query1, (agreement_id,))
+            data_table2 = await self.local_db.execute_query(query2, (agreement_id,))
+
+            # Запрос на получение данных о договоре
+            agreement_query = """
+            SELECT a.agreement_name, a.agreement_date, f.name AS fop_name, f.inn AS inn_fop, f.pidstava AS pidstava_fop, 
+                   f.address AS fop_address, f.iban AS fop_iban, f.bank_account_detail AS bank_account_detail_fop, f.name_short AS fop_name_short,
+                   r.name AS ri_name, r.inn AS inn_ri, r.pidstava AS pidstava_ri, r.address AS ri_address, r.iban AS ri_iban, r.bank_account_detail AS bank_account_detail_ri, r.name_short AS ri_name_short,
+                   a.agreement_state
+            FROM credentials.agreements AS a
+            JOIN credentials.fop_credentials AS f ON a.master_id = f.id
+            JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
+            WHERE a.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            agreement = agreement_data[0]  # Получаем данные как строку, а не кортеж.
+
+            # Преобразуем данные и форматируем дату
+            agreement_date_str, month_ukr_name, year, _ = self.format_date(agreement[1])
+
+            # Загрузка шаблона договора
+            template_path = 'static/docs/M-RI_dod1.docx'
+            doc = Document(template_path)
+
+            # Замена маркеров в шаблоне
+            replacements = {
+                '@agr_num': agreement[0],
+                '@agr_date': agreement_date_str,
+                '@fop_name': agreement[2],
+                '@inn_fop': agreement[3],
+                '@pidstava_fop': agreement[4],
+                '@ri_name': agreement[9],
+                '@inn_ri': agreement[10],
+                '@pidstava_ri': agreement[11],
+                '@fop_address': agreement[5],
+                '@fop_iban': agreement[6],
+                '@bank_account_detail_fop': agreement[7],
+                '@fopname_short': agreement[8],
+                '@ri_address': agreement[12],
+                '@ri_iban': agreement[13],
+                '@bank_account_detail_ri': agreement[14],
+                '@riname_short': agreement[15],
+                '@agreement_state': 'Активний' if agreement[16] == 1 else 'Неактивний'  # Активный договор или нет
+            }
+
+            # Замена текста в шаблоне
+            self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
+
+            # Создание таблицы @table1
+            table1 = self.create_table(doc, data_table1,
+                                       ['Найменування (модель) технічних засобів електронних комунікацій', 'Кількість'])
+
+            # Создание таблицы @table2
+            table2 = self.create_table(doc, data_table2,
+                                       ['Діапазон ІР адрес технічних засобів електронних комунікацій'])
+
+            # Замена маркеров @table1 и @table2 на таблицы
+            self.replace_table_in_document(doc, '@table1', table1)
+            self.replace_table_in_document(doc, '@table2', table2)
+
+            # Сохранение документа в память
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
+
+            # Формируем название файла
+            file_name = f"{agreement[0]}_Додаток1.docx"
+
+            # Отправка документа клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
+
 
         @self.app.route('/protocols/<int:agreement_id>', methods=['GET', 'POST'])
         @basic_auth_required()
