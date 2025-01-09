@@ -1422,6 +1422,23 @@ class MyApp:
             # Отправка документа клиенту
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
+        @self.app.route('/update_agreement_state/<int:agreement_id>', methods=['POST'])
+        @basic_auth_required()
+        async def update_agreement_state(agreement_id):
+            data = await request.json
+            agreement_state = data.get('agreement_state')
+
+            if agreement_state is None:
+                return {"error": "agreement_state is required"}, 400
+
+            query = """
+            UPDATE credentials.agreements
+            SET agreement_state = %s
+            WHERE id = %s
+            """
+            await self.local_db.execute_query(query, (agreement_state, agreement_id))
+            return {"message": "Agreement state updated successfully"}, 200
+
         @self.app.route('/agreement_detail/<int:agreement_id>', methods=['GET', 'POST'])
         @basic_auth_required()
         async def agreement_detail(agreement_id):
@@ -1484,9 +1501,82 @@ class MyApp:
             if request.method == 'POST':
                 termination_date = (await request.form).get('termination_date')
                 # Логика сохранения расторжения, например, обновление базы
+                term_query = """
+                INSERT INTO credentials.agreement_termination(agreement_id, termination_date)
+                VALUES (%s, %s)
+                """
+                await self.local_db.execute_query(term_query, (agreement_id, termination_date))
                 return redirect(url_for('agreement_detail', agreement_id=agreement_id))
 
             return await render_template('agreement_detail.html', agreement=agreement)
+
+        @self.app.route('/agreement_termination/<int:agreement_id>', methods=['GET'])
+        @basic_auth_required()
+        async def agreement_termination(agreement_id):
+            # Запрос на получение данных о договоре
+            agreement_query = """
+            SELECT a.agreement_name, a.agreement_date, f.name AS fop_name, f.inn AS inn_fop, f.pidstava AS pidstava_fop, 
+                   f.address AS fop_address, f.iban AS fop_iban, f.bank_account_detail AS bank_account_detail_fop, f.name_short AS fop_name_short,
+                   r.name AS ri_name, r.inn AS inn_ri, r.pidstava AS pidstava_ri, r.address AS ri_address, r.iban AS ri_iban, r.bank_account_detail AS bank_account_detail_ri, r.name_short AS ri_name_short,
+                   a.agreement_state, t.termination_date
+            FROM credentials.agreements AS a
+            JOIN credentials.fop_credentials AS f ON a.master_id = f.id
+            JOIN credentials.ri_credentials AS r ON a.ri_id = r.id
+            JOIN credentials.agreement_termination AS t ON a.id = t.agreement_id
+            WHERE a.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            agreement = agreement_data[0]  # Получаем первую запись для передачи данных как строку
+
+            # Преобразуем дату договора
+            agreement_date_str, month_ukr_name, year, _ = self.format_date(agreement[1])
+            termination_date_str, termination_month_ukr, year, _ = self.format_date(agreement[17])
+
+            # Загрузка шаблона расторжения договора
+            template_path = 'static/docs/M-RI_termination.docx'
+            doc = Document(template_path)
+
+            # Подготовка данных для замены
+            replacements = {
+                '@agr_num': agreement[0],
+                '@agr_date': agreement_date_str,
+                '@fop_name': agreement[2],
+                '@inn_fop': agreement[3],
+                '@pidstava_fop': agreement[4],
+                '@ri_name': agreement[9],
+                '@inn_ri': agreement[10],
+                '@pidstava_ri': agreement[11],
+                '@fop_address': agreement[5],
+                '@fop_iban': agreement[6],
+                '@bank_account_detail_fop': agreement[7],
+                '@fopname_short': agreement[8],
+                '@ri_address': agreement[12],
+                '@ri_iban': agreement[13],
+                '@bank_account_detail_ri': agreement[14],
+                '@riname_short': agreement[15],
+                '@agreement_state': 'Активный' if agreement[16] == 1 else 'Неактивный',
+                '@term_date': termination_date_str
+            }
+
+            # Замена текста в шаблоне
+            self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
+
+            # Сохранение документа в память
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
+
+            # Формируем название файла
+            file_name = f"{agreement[0]}_РАСТОРЖЕНИЕ_ДОГОВОРА.docx"
+
+            # Отправка файла клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
         @self.app.route('/generate_contract/<int:agreement_id>', methods=['GET'])
         @basic_auth_required()
