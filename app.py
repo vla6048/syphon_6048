@@ -44,6 +44,12 @@ class MyApp:
             db=os.getenv('MYSQL_DB_REMOTE')
         )
 
+
+
+        print(os.getenv('MYSQL_HOST_LOCAL'))
+        print(os.getenv('MYSQL_USER_LOCAL'))
+        print(os.getenv('MYSQL_PASSWORD_LOCAL'))
+
         bp = Blueprint('generate_protocols', __name__)
         # Настройка маршрутов
         self.setup_routes()
