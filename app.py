@@ -44,12 +44,6 @@ class MyApp:
             db=os.getenv('MYSQL_DB_REMOTE')
         )
 
-
-
-        print(os.getenv('MYSQL_HOST_LOCAL'))
-        print(os.getenv('MYSQL_USER_LOCAL'))
-        print(os.getenv('MYSQL_PASSWORD_LOCAL'))
-
         bp = Blueprint('generate_protocols', __name__)
         # Настройка маршрутов
         self.setup_routes()
@@ -1846,25 +1840,63 @@ class MyApp:
 
             # Получаем выбранный фильтр из параметров запроса
             selected_engineer = request.args.get('engineer_filter', '')
-
+            selected_canton = request.args.get('canton_filter', '')
+            selected_state = request.args.get('state_filter', 'all')
             # SQL-запрос для получения всех инженеров
             engineers_query = "SELECT DISTINCT name FROM credentials.ri_credentials;"
             engineers_data = await self.local_db.execute_query(engineers_query)
             engineers = [row[0] for row in engineers_data]
+            # Получаем список всех округов
+            cantons_query = "SELECT DISTINCT canton FROM credentials.fop_territory;"
+            cantons_data = await self.local_db.execute_query(cantons_query)
+            cantons = [row[0] for row in cantons_data]
 
             # SQL-запрос для получения информации о всех договорах
             query = """
-            SELECT a.id, a.agreement_name, fc.name AS master_name, rc.name AS engineer_name, a.agreement_state
-            FROM credentials.agreements a
-            JOIN credentials.fop_credentials fc ON a.master_id = fc.id
-            JOIN credentials.ri_credentials rc ON a.ri_id = rc.id
+                                SELECT 
+                a.id, 
+                a.agreement_name, 
+                fc.name AS master_name, 
+                rc.name AS engineer_name, 
+                a.agreement_state, 
+                ter.canton
+            FROM 
+                credentials.agreements a
+            JOIN 
+                credentials.fop_credentials fc ON a.master_id = fc.id
+            JOIN 
+                credentials.ri_credentials rc ON a.ri_id = rc.id
+            JOIN 
+                (
+                    SELECT DISTINCT master_id, canton
+                    FROM credentials.fop_territory
+                ) ter ON ter.master_id = a.master_id
             """
 
+            # Условия для фильтров
+            filters = []
+            params = []
+
             if selected_engineer:
-                query += " WHERE rc.name = %s"
-                agreements_data = await self.local_db.execute_query(query, (selected_engineer,))
-            else:
-                agreements_data = await self.local_db.execute_query(query)
+                filters.append("rc.name = %s")
+                params.append(selected_engineer)
+
+            if selected_canton:
+                filters.append("ter.canton = %s")
+                params.append(selected_canton)
+
+            if selected_state == 'active':
+                filters.append("a.agreement_state = 1")
+            elif selected_state == 'inactive':
+                filters.append("a.agreement_state = 0")
+
+            # Добавляем условия в запрос
+            if filters:
+                query += " WHERE " + " AND ".join(filters)
+
+            # Выполняем запрос
+            agreements_data = await self.local_db.execute_query(query, tuple(params))
+
 
             # # Выполняем запрос и получаем данные по договорам
             # agreements_data = await self.local_db.execute_query(query)
@@ -1880,6 +1912,7 @@ class MyApp:
                     'master_name': agreement[2],
                     'engineer_name': agreement[3],
                     'agreement_state': agreement[4],
+                    'canton': agreement[5],
                     'protocols_by_year': {}
                 }
 
@@ -1903,12 +1936,16 @@ class MyApp:
                 agreements_list.append(agreement_dict)
 
             # Передаем все данные в шаблон, включая все уникальные годы
+
             return await render_template(
                 'agreements.html',
                 agreements=agreements_list,
                 all_years=sorted(all_years),
                 engineers=engineers,
-                selected_engineer=selected_engineer
+                cantons=cantons,
+                selected_engineer=selected_engineer,
+                selected_canton=selected_canton,
+                selected_state=selected_state
             )
 
         @self.app.route('/fop-form')
