@@ -1969,6 +1969,8 @@ class MyApp:
             bank_account_detail = form_data.get('bank_account_detail')
             name_short = form_data.get('name_short')
             email = form_data.get('email')
+            canton = form_data.get('canton')
+            vetkas = form_data.getlist('vetka[]')  # Получаем список веток
 
             # Выбор таблицы в зависимости от позиции
             if position == 'Мастер':
@@ -1978,16 +1980,33 @@ class MyApp:
             else:
                 return jsonify({"error": "Неверная позиция"}), 400
 
-            # SQL-запрос для вставки данных
+            # SQL-запрос для вставки данных в fop_credentials
             insert_query = f"""
             INSERT INTO {table} (name, inn, pidstava, address, iban, bank_account_detail, name_short, email)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
 
-            # Вставка данных в базу
+            # Вставка данных в базу и получение id новой записи
             try:
-                await self.local_db.execute_query(insert_query,
-                                                  (name, inn, pidstava, address, iban, bank_account_detail, name_short, email))
+                # Выполняем вставку данных
+                await self.local_db.execute_query(insert_query, (
+                name, inn, pidstava, address, iban, bank_account_detail, name_short, email))
+
+                # Получаем id последней вставленной записи
+                result = await self.local_db.execute_query("select max(id) from credentials.fop_credentials")
+                master_id = result[0][0]  # Получаем id новой записи
+                print(master_id)
+
+                # Вставка данных в таблицу fop_territory
+                if vetkas:
+                    insert_territory_query = """
+                    INSERT INTO credentials.fop_territory (master_id, canton, vetka)
+                    VALUES (%s, %s, %s)
+                    """
+                    for vetka in vetkas:
+                        print(vetka)
+                        await self.local_db.execute_query(insert_territory_query, (master_id, canton, int(vetka)))
+
                 return jsonify({"message": "Данные успешно добавлены"}), 200
             except Exception as e:
                 return jsonify({"error": str(e)}), 500

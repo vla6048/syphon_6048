@@ -6,6 +6,7 @@
 <div class="container mt-5">
     <h1>Внесение информации о ФОП</h1>
     <form action="/submit-fop" method="POST">
+        <!-- Существующие поля формы -->
         <div class="mb-3">
             <label for="position" class="form-label">Позиция:</label>
             <select name="position" id="position" class="form-select" required>
@@ -54,7 +55,33 @@
             <input type="text" id="email" name="email" class="form-control" required>
         </div>
 
+        <!-- Новые поля для округа и веток -->
+        <div class="mb-3">
+            <label for="canton" class="form-label">Округ:</label>
+            <input type="text" id="canton" name="canton" class="form-control" required>
+        </div>
+
+        <div class="mb-3">
+            <label for="vetka" class="form-label">Ветка:</label>
+            <div id="vetka-fields">
+                <input type="number" name="vetka[]" class="form-control vetka-input" required>
+            </div>
+            <button type="button" id="add-vetka" class="btn btn-secondary mt-2">+ Добавить ветку</button>
+        </div>
+
         <button type="submit" class="btn btn-primary">Отправить</button>
     </form>
 </div>
+
+<script>
+    document.getElementById('add-vetka').addEventListener('click', function() {
+        const vetkaFields = document.getElementById('vetka-fields');
+        const newVetkaInput = document.createElement('input');
+        newVetkaInput.type = 'number';
+        newVetkaInput.name = 'vetka[]';
+        newVetkaInput.className = 'form-control vetka-input mt-2';
+        newVetkaInput.required = true;
+        vetkaFields.appendChild(newVetkaInput);
+    });
+</script>
 {% endblock %}
