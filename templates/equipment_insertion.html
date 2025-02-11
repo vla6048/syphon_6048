@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Внесение оборудования{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mt-4">Внесение нового оборудования</h2>
+
+    <form id="equipment-form" method="POST" action="{{ url_for('equipment_insertion') }}">
+        <div class="form-group">
+            <label for="equipment-type">Тип оборудования</label>
+            <select class="form-control" id="equipment-type" name="equipment_type">
+                <option value="" selected disabled>Выберите тип оборудования</option>
+                {% for eq_type in equipment_types %}
+                <option value="{{ eq_type.id }}" data-table="{{ eq_type.related_table }}">{{ eq_type.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="serial-number">Серийный номер</label>
+            <input type="text" class="form-control" id="serial-number" name="serial_number" required>
+            <small id="sn-error" class="text-danger d-none">Этот серийный номер уже существует!</small>
+        </div>
+
+        <div id="dynamic-fields"></div> <!-- Сюда будут добавляться поля -->
+
+        <button type="submit" class="btn btn-primary mt-3" id="submit-btn" disabled>Добавить оборудование</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const equipmentType = document.getElementById("equipment-type");
+    const serialNumber = document.getElementById("serial-number");
+    const snError = document.getElementById("sn-error");
+    const dynamicFields = document.getElementById("dynamic-fields");
+    const submitBtn = document.getElementById("submit-btn");
+
+    // Проверка серийного номера
+    serialNumber.addEventListener("input", function() {
+        const sn = serialNumber.value.trim();
+        if (sn.length > 3) { // Проверяем только если введено больше 3 символов
+            fetch(`/check_serial_number?sn=${sn}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.exists) {
+                        snError.classList.remove("d-none");
+                        submitBtn.disabled = true;
+                    } else {
+                        snError.classList.add("d-none");
+                        submitBtn.disabled = false;
+                    }
+                });
+        }
+    });
+
+    // Динамическое отображение полей в зависимости от типа оборудования
+    equipmentType.addEventListener("change", function() {
+        const selectedType = equipmentType.options[equipmentType.selectedIndex];
+        const relatedTable = selectedType.dataset.table;
+
+        if (!relatedTable) {
+            dynamicFields.innerHTML = "";
+            return;
+        }
+
+        fetch(`/get_equipment_fields?table=${relatedTable}`)
+            .then(response => response.json())
+            .then(data => {
+                dynamicFields.innerHTML = ""; // Очищаем предыдущие поля
+                data.fields.forEach(field => {
+                    const formGroup = document.createElement("div");
+                    formGroup.className = "form-group";
+                    
+                    const label = document.createElement("label");
+                    label.textContent = field.label;
+                    label.setAttribute("for", field.name);
+                    
+                    const input = document.createElement("input");
+                    input.type = field.type;
+                    input.className = "form-control";
+                    input.name = field.name;
+                    input.id = field.name;
+                    input.required = true;
+                    
+                    formGroup.appendChild(label);
+                    formGroup.appendChild(input);
+                    dynamicFields.appendChild(formGroup);
+                });
+
+                submitBtn.disabled = false;
+            });
+    });
+});
+</script>
+{% endblock %}

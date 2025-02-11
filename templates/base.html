@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -49,6 +50,16 @@
                         <a class="dropdown-item" href="{{ url_for('estimates_upload') }}">Загрузка расчетов Софт</a>
                         <a class="dropdown-item" href="{{ url_for('agreements') }}">Просмотр договоров</a>
                         <a class="dropdown-item" href="{{ url_for('llc_agreements') }}">Просмотр договоров ТОВ</a>
+                    </div>
+                </li>
+
+                <!-- ЗИП - выпадающий список -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="zipDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        ЗИП
+                    </a>
+                    <div class="dropdown-menu" aria-labelledby="zipDropdown">
+                        <a class="dropdown-item" href="#">Внесение оборудования</a>
                     </div>
                 </li>
             </ul>

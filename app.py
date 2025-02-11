@@ -849,6 +849,8 @@ class MyApp:
             # Отправка документа клиенту
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
+
+
         @self.app.route('/llc_acts/<int:agreement_id>/delete/<int:act_id>', methods=['POST'])
         @basic_auth_required()
         async def delete_act(agreement_id, act_id):
