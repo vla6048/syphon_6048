@@ -10,6 +10,21 @@ class DatabaseManager:
         self.pool_recycle = pool_recycle
         self.connection = None
 
+    async def execute_insert(self, query, params=None):
+        """
+        Выполнение SQL-запроса INSERT и возврат ID вставленной записи.
+        """
+        await self.ensure_connection()
+        if self.connection:
+            async with self.connection.cursor() as cursor:
+                try:
+                    await cursor.execute(query, params)
+                    await self.connection.commit()
+                    return cursor.lastrowid  # Возвращаем ID вставленной записи
+                except aiomysql.Error as e:
+                    print(f"Ошибка выполнения INSERT-запроса: {e}")
+                    return None
+
     async def connect(self):
         """
         Подключение к базе данных с использованием параметра pool_recycle.

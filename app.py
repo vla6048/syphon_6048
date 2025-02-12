@@ -1,6 +1,8 @@
 from quart import Quart, render_template, request, jsonify,redirect, url_for, send_file, flash, Blueprint
 from quart_auth import QuartAuth, basic_auth_required
 from docx import Document
+from aiohttp import web
+import aiomysql
 from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.enum.table import WD_ALIGN_VERTICAL
@@ -131,6 +133,72 @@ class MyApp:
 
 
     def setup_routes(self):
+
+        @self.app.route('/equipment_insertion', methods=['GET', 'POST'])
+        @basic_auth_required()
+        async def equipment_insertion():
+            # Получаем список типов оборудования
+            query_types = "SELECT id, name, related_table FROM equipments.equipment_types"
+            equipment_types = await self.local_db.execute_query(query_types)
+            print(equipment_types)
+
+            if request.method == 'POST':
+                data = await request.form
+                type_id = int(data.get('type_id'))
+                state = data.get('state')
+                remark = data.get('remark') or None  # Может быть пустым
+                sn = data.get('sn') if data.get('sn') else None  # Проверяем, указан ли серийный номер
+                related_table = data.get('related_table')
+
+                # Вставка в таблицу equipment
+                insert_equipment = """
+                    INSERT INTO equipments.equipment (type_id, state, sn, remark)
+                    VALUES (%s, %s, %s, %s)
+                """
+                equipment_values = (type_id, state, sn, remark)
+                equipment_id = await self.local_db.execute_insert(insert_equipment, equipment_values)
+
+                if related_table and equipment_id:
+                    # Получаем названия колонок для доп. характеристик
+                    query_columns = f"SHOW COLUMNS FROM equipments.{related_table}"
+                    columns_data = await self.local_db.execute_query(query_columns)
+                    columns = [col[0] for col in columns_data if col[0] != 'id' and col[0] != 'equipment_id']
+
+                    # Собираем данные из формы
+                    related_values = [equipment_id] + [data.get(col) for col in columns]
+                    insert_related = f"""
+                        INSERT INTO equipments.{related_table} (equipment_id, {', '.join(columns)})
+                        VALUES ({', '.join(['%s'] * len(related_values))})
+                    """
+                    await self.local_db.execute_insert(insert_related, related_values)
+
+                return jsonify({"success": True, "equipment_id": equipment_id})
+
+            return await render_template('equipment_insertion.html', equipment_types=equipment_types)
+
+        @self.app.route('/check_sn', methods=['GET'])
+        @basic_auth_required()
+        async def check_sn():
+            sn = request.args.get('sn')
+            query = "SELECT COUNT(*) FROM equipments.equipment WHERE sn = %s"
+            result = await self.local_db.execute_query(query, (sn,))
+            return jsonify({"exists": result[0][0] > 0})
+
+        @self.app.route('/get_fields/<table>', methods=['GET'])
+        async def get_fields(table):
+            """
+            Возвращает список полей таблицы (кроме 'id' и 'equipment_id') в формате JSON.
+            """
+            query = f"SHOW COLUMNS FROM equipments.{table}"
+            result = await self.local_db.execute_query(query)
+
+            if not result:
+                return jsonify([])  # Если таблицы нет, возвращаем пустой список
+
+            # Фильтруем колонки, исключая технические столбцы
+            columns = [col[0] for col in result if col[0] not in ["id", "equipment_id"]]
+
+            return jsonify(columns)
 
         @self.app.route('/llc_acts/<int:act_id>/generate_report_llc', methods=['POST'])
         async def generate_report_llc(act_id):
