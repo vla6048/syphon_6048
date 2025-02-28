@@ -29,6 +29,8 @@
         <h3>Инженер: {{ agreement.engineer_name }}</h3>
 
         <a href="{{ url_for('generate_llc_protocol', agreement_id=agreement_id) }}" class="btn btn-warning mb-4">Единоразовый протокол</a>
+        <a href="{{ url_for('generate_llc_contract', agreement_id=agreement_id) }}" class="btn btn-warning mb-4">Договор</a>
+        <a href="{{ url_for('generate_llc_appendix', agreement_id=agreement_id) }}" class="btn btn-warning mb-4">Додаток 1</a>
 
         {% if acts %}
         <div class="table-responsive">

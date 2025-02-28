@@ -9,29 +9,29 @@
     <!-- Выбор типа оборудования -->
     <div class="form-group">
         <label for="equipmentType">Тип оборудования</label>
-        <select id="equipmentType" name="equipmentType" class="form-control">
-    <option value="">Выберите тип</option>
-    {% for type in equipment_types %}
-        <option value="{{ type.id }}" data-related-table="{{ type.related_table }}">{{ type.name }}</option>
-    {% endfor %}
-</select>
-    </div>
-
-    <!-- Чекбокс "Без серийного номера" -->
-    <div class="form-group d-none" id="snCheckboxContainer">
-        <input type="checkbox" id="noSnCheckbox" name="noSnCheckbox">
-        <label for="noSnCheckbox">Без серийного номера</label>
+        <select id="equipmentType" name="type_id" class="form-control" required>
+            <option value="">Выберите тип</option>
+            {% for type in equipment_types %}
+                <option value="{{ type[0] }}" data-related-table="{{ type[2] }}">{{ type[1] }}</option>
+            {% endfor %}
+        </select>
     </div>
 
     <!-- Поле для серийного номера -->
-    <div class="form-group d-none" id="snContainer">
+    <div class="form-group">
         <label for="serialNumber">Серийный номер</label>
-        <input type="text" id="serialNumber" name="serialNumber" class="form-control">
+        <input type="text" id="serialNumber" name="sn" class="form-control">
         <small id="snWarning" class="text-danger d-none">Этот серийный номер уже существует!</small>
     </div>
 
-    <!-- Выбор состояния -->
-    <div class="form-group d-none" id="stateContainer">
+    <!-- Чекбокс "Без серийного номера" -->
+    <div class="form-group">
+        <input type="checkbox" id="noSnCheckbox" name="no_sn">
+        <label for="noSnCheckbox">Без серийного номера</label>
+    </div>
+
+    <!-- Поля для состояния и примечания -->
+    <div class="form-group">
         <label for="state">Состояние</label>
         <select id="state" name="state" class="form-control">
             <option value="new">Новое</option>
@@ -40,151 +40,99 @@
         </select>
     </div>
 
-    <!-- Поле "Примечание" -->
-    <div class="form-group d-none" id="remarkContainer">
+    <div class="form-group">
         <label for="remark">Примечание</label>
         <textarea id="remark" name="remark" class="form-control"></textarea>
     </div>
 
-    <!-- Динамически добавляемые поля -->
-    <div id="dynamicFields" class="d-none">
+    <!-- Динамические поля -->
+    <div id="dynamicFieldsContainer" class="d-none">
         <h4>Дополнительные параметры</h4>
-        <div id="fieldsContainer"></div>
+        <div id="dynamicFields"></div>
     </div>
 
     <!-- Кнопка отправки -->
-    <button type="submit" class="btn btn-primary d-none" id="submitBtn">Внести</button>
+    <button type="submit" id="submitButton" class="btn btn-primary">Внести</button>
 </form>
 
-<!-- Всплывающее уведомление -->
-<div id="successModal" class="modal fade" tabindex="-1" role="dialog">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Успешно добавлено!</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <p>Материал добавлен с ID <span id="newMaterialId"></span>.</p>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    document.addEventListener("DOMContentLoaded", function () {
-        const equipmentType = document.getElementById("equipmentType");
-        const noSnCheckbox = document.getElementById("noSnCheckbox");
-        const snContainer = document.getElementById("snContainer");
-        const snInput = document.getElementById("serialNumber");
-        const snWarning = document.getElementById("snWarning");
-        const snCheckboxContainer = document.getElementById("snCheckboxContainer");
-        const dynamicFields = document.getElementById("dynamicFields");
-        const fieldsContainer = document.getElementById("fieldsContainer");
-        const submitBtn = document.getElementById("submitBtn");
-        const stateContainer = document.getElementById("stateContainer");
-        const remarkContainer = document.getElementById("remarkContainer");
+document.addEventListener("DOMContentLoaded", function () {
+    const equipmentTypeSelect = document.getElementById("equipmentType");
+    const snCheckbox = document.getElementById("noSnCheckbox");
+    const snInput = document.getElementById("serialNumber");
+    const snWarning = document.getElementById("snWarning");
+    const submitButton = document.getElementById("submitButton");
+    const dynamicFieldsContainer = document.getElementById("dynamicFieldsContainer");
+    const dynamicFields = document.getElementById("dynamicFields");
 
-        // При изменении типа оборудования
-        equipmentType.addEventListener("change", async function () {
-            const selectedOption = equipmentType.options[equipmentType.selectedIndex];
-            const relatedTable = selectedOption.dataset.relatedTable;
+    // Отключение серийного номера при выборе "Без серийного номера"
+    snCheckbox.addEventListener("change", function () {
+        if (this.checked) {
+            snInput.disabled = true;
+            snInput.value = "";
+            snWarning.classList.add("d-none");
+            submitButton.disabled = false;
+        } else {
+            snInput.disabled = false;
+        }
+    });
 
-            if (equipmentType.value) {
-                snCheckboxContainer.classList.remove("d-none");
-                stateContainer.classList.remove("d-none");
-                remarkContainer.classList.remove("d-none");
-                submitBtn.classList.remove("d-none");
-            } else {
-                snCheckboxContainer.classList.add("d-none");
-                stateContainer.classList.add("d-none");
-                remarkContainer.classList.add("d-none");
-                submitBtn.classList.add("d-none");
-            }
-
-            if (relatedTable) {
-                try {
-                    const response = await fetch(`/get_fields/${relatedTable}`);
-                    const fields = await response.json();
-                    fieldsContainer.innerHTML = "";
-
-                    fields.forEach(field => {
-                        const div = document.createElement("div");
-                        div.classList.add("form-group");
-                        div.innerHTML = `<label for="${field}">${field}</label>
-                                         <input type="text" id="${field}" name="${field}" class="form-control">`;
-                        fieldsContainer.appendChild(div);
-                    });
-
-                    dynamicFields.classList.remove("d-none");
-                } catch (error) {
-                    console.error("Ошибка загрузки полей:", error);
-                }
-            } else {
-                dynamicFields.classList.add("d-none");
-            }
-        });
-
-        // Логика работы с серийным номером
-        noSnCheckbox.addEventListener("change", function () {
-            if (noSnCheckbox.checked) {
-                snContainer.classList.add("d-none");
-                snInput.value = "";
-                snWarning.classList.add("d-none");
-            } else {
-                snContainer.classList.remove("d-none");
-            }
-        });
-
-        // Проверка уникальности серийного номера
-        snInput.addEventListener("input", async function () {
-            const snValue = snInput.value.trim();
-            if (snValue.length > 0) {
-                try {
-                    const response = await fetch(`/check_sn?sn=${snValue}`);
-                    const data = await response.json();
+    // Проверка серийного номера в БД
+    snInput.addEventListener("input", function () {
+        const sn = snInput.value.trim();
+        if (sn.length > 0) {
+            fetch(`/check_sn?sn=${sn}`)
+                .then(response => response.json())
+                .then(data => {
                     if (data.exists) {
                         snWarning.classList.remove("d-none");
-                        submitBtn.disabled = true;
+                        submitButton.disabled = true;
                     } else {
                         snWarning.classList.add("d-none");
-                        submitBtn.disabled = false;
+                        submitButton.disabled = false;
                     }
-                } catch (error) {
-                    console.error("Ошибка проверки SN:", error);
-                }
-            } else {
-                snWarning.classList.add("d-none");
-                submitBtn.disabled = false;
-            }
-        });
-
-        // Обработчик отправки формы
-        document.getElementById("equipmentForm").addEventListener("submit", async function (event) {
-            event.preventDefault();
-            const formData = new FormData(this);
-
-            try {
-                const response = await fetch("/equipment_insertion", {
-                    method: "POST",
-                    body: formData
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById("newMaterialId").textContent = data.id;
-                    $("#successModal").modal("show");
-                } else {
-                    alert("Ошибка при добавлении материала!");
-                }
-            } catch (error) {
-                console.error("Ошибка отправки формы:", error);
-            }
-        });
+                })
+                .catch(error => console.error("Ошибка проверки SN:", error));
+        } else {
+            snWarning.classList.add("d-none");
+            submitButton.disabled = false;
+        }
     });
+
+    // Загрузка динамических полей при выборе типа оборудования
+    equipmentTypeSelect.addEventListener("change", function () {
+        const selectedOption = equipmentTypeSelect.options[equipmentTypeSelect.selectedIndex];
+        const relatedTable = selectedOption.dataset.relatedTable;
+
+        if (relatedTable) {
+            fetch(`/get_fields/${relatedTable}`)
+                .then(response => response.json())
+                .then(fields => {
+                    dynamicFields.innerHTML = "";
+                    if (fields.length > 0) {
+                        dynamicFieldsContainer.classList.remove("d-none");
+                        fields.forEach(field => {
+                            const formGroup = document.createElement("div");
+                            formGroup.className = "form-group";
+                            formGroup.innerHTML = `
+                                <label for="${field}">${field}</label>
+                                <input type="text" id="${field}" name="${field}" class="form-control">
+                            `;
+                            dynamicFields.appendChild(formGroup);
+                        });
+                    } else {
+                        dynamicFieldsContainer.classList.add("d-none");
+                    }
+                })
+                .catch(error => console.error("Ошибка загрузки полей:", error));
+        } else {
+            dynamicFieldsContainer.classList.add("d-none");
+            dynamicFields.innerHTML = "";
+        }
+    });
+});
 </script>
 {% endblock %}

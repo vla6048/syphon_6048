@@ -17,6 +17,7 @@ from db_manager import DatabaseManager
 import random
 from math import floor
 import openpyxl
+import uuid
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -134,21 +135,47 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/get_unified_values/<related_table>', methods=['GET'])
+        @basic_auth_required()
+        async def get_unified_values(related_table):
+            """
+            Возвращает унифицированные значения для выбранного типа оборудования.
+            """
+            query_unified = """
+                SELECT category, value 
+                FROM equipments.unified_values 
+                WHERE related_table = %s
+            """
+            unified_values_raw = await self.local_db.execute_query(query_unified, (related_table,))
+
+            # Группируем по категориям
+            unified_values = {}
+            for category, value in unified_values_raw:
+                unified_values.setdefault(category, []).append(value)
+
+            return jsonify(unified_values)
+
         @self.app.route('/equipment_insertion', methods=['GET', 'POST'])
         @basic_auth_required()
         async def equipment_insertion():
             # Получаем список типов оборудования
             query_types = "SELECT id, name, related_table FROM equipments.equipment_types"
             equipment_types = await self.local_db.execute_query(query_types)
-            print(equipment_types)
+
+            # Преобразуем в список словарей для удобства использования
+            equipment_types_dict = {str(t[0]): {"name": t[1], "related_table": t[2]} for t in equipment_types}
 
             if request.method == 'POST':
                 data = await request.form
-                type_id = int(data.get('type_id'))
+                type_id = data.get('type_id')
                 state = data.get('state')
-                remark = data.get('remark') or None  # Может быть пустым
-                sn = data.get('sn') if data.get('sn') else None  # Проверяем, указан ли серийный номер
-                related_table = data.get('related_table')
+                remark = data.get('remark') or None
+                sn = data.get('sn') if data.get('sn') else f'NO_SN_{uuid.uuid4().hex}'
+
+                if not type_id or type_id not in equipment_types_dict:
+                    return jsonify({"success": False, "error": "Некорректный тип оборудования"}), 400
+
+                related_table = equipment_types_dict[type_id]["related_table"]
 
                 # Вставка в таблицу equipment
                 insert_equipment = """
@@ -158,13 +185,12 @@ class MyApp:
                 equipment_values = (type_id, state, sn, remark)
                 equipment_id = await self.local_db.execute_insert(insert_equipment, equipment_values)
 
+                # Вставка в связанную таблицу (если она есть)
                 if related_table and equipment_id:
-                    # Получаем названия колонок для доп. характеристик
                     query_columns = f"SHOW COLUMNS FROM equipments.{related_table}"
                     columns_data = await self.local_db.execute_query(query_columns)
-                    columns = [col[0] for col in columns_data if col[0] != 'id' and col[0] != 'equipment_id']
+                    columns = [col[0] for col in columns_data if col[0] not in ('id', 'equipment_id')]
 
-                    # Собираем данные из формы
                     related_values = [equipment_id] + [data.get(col) for col in columns]
                     insert_related = f"""
                         INSERT INTO equipments.{related_table} (equipment_id, {', '.join(columns)})
@@ -180,24 +206,25 @@ class MyApp:
         @basic_auth_required()
         async def check_sn():
             sn = request.args.get('sn')
+            if not sn:
+                return jsonify({"exists": False})
+
             query = "SELECT COUNT(*) FROM equipments.equipment WHERE sn = %s"
             result = await self.local_db.execute_query(query, (sn,))
+
             return jsonify({"exists": result[0][0] > 0})
 
         @self.app.route('/get_fields/<table>', methods=['GET'])
         async def get_fields(table):
-            """
-            Возвращает список полей таблицы (кроме 'id' и 'equipment_id') в формате JSON.
-            """
+            """ Возвращает список полей таблицы (кроме 'id' и 'equipment_id') в формате JSON. """
             query = f"SHOW COLUMNS FROM equipments.{table}"
             result = await self.local_db.execute_query(query)
 
             if not result:
-                return jsonify([])  # Если таблицы нет, возвращаем пустой список
+                return jsonify([])
 
-            # Фильтруем колонки, исключая технические столбцы
-            columns = [col[0] for col in result if col[0] not in ["id", "equipment_id"]]
-
+            # Исключаем технические столбцы
+            columns = [col[0] for col in result if col[0] not in ("id", "equipment_id")]
             return jsonify(columns)
 
         @self.app.route('/llc_acts/<int:act_id>/generate_report_llc', methods=['POST'])
@@ -917,7 +944,191 @@ class MyApp:
             # Отправка документа клиенту
             return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
+        @self.app.route('/llc_acts/<int:agreement_id>/generate_contract', methods=['GET'])
+        @basic_auth_required()
+        async def generate_llc_contract(agreement_id):
+            # Получаем данные по договору и связанные данные для замены в шаблоне
+            agreement_query = """
+            SELECT la.id AS contract_num, la.agreement_name, la.agreement_date, 
+                   lc.name AS llc_name, lc.in_persona, lc.address AS llc_address, lc.edrpou AS llc_edrpou, 
+                   lc.iban AS llc_iban, lc.bank_account_detail AS bank_account_detail_llc, lc.inn AS llc_inn, lc.name_short AS llc_shortname,
+                   ri.name AS ri_name, ri.inn AS ri_inn, ri.pidstava, ri.address AS ri_address, 
+                   ri.iban AS ri_iban, ri.bank_account_detail AS bank_account_detail_ri, ri.name_short AS ri_shortname
+            FROM credentials.llc_agreements AS la
+            JOIN credentials.llc_credentials AS lc ON la.llc_id = lc.id
+            JOIN credentials.ri_credentials AS ri ON la.ri_id = ri.id
+            WHERE la.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
 
+            # Проверяем, что данные по договору найдены
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            # Извлекаем данные из результата
+            agreement = agreement_data[0]
+
+            # Определяем шаблон договора
+            template_path = 'static/docs/llc_contract.docx'
+
+            # Загружаем шаблон
+            doc = Document(template_path)
+
+            # Формируем номер договора
+            contract_num = f"{agreement[0]}_{agreement[2].strftime('%Y-%m-%d')}_{agreement[1]}"
+
+            # Задаем значения для замены
+            replacements = {
+                '@contract_num': contract_num,
+                '@agr_name': agreement[1],
+                '@agr_date': self.format_date(agreement[2])[0],
+                '@llc_name': agreement[3],
+                '@persona': agreement[4],
+                '@ri_name': agreement[11],
+                '@ri_inn': agreement[12],
+                '@pidstava': agreement[13],
+                '@llc_address': agreement[5],
+                '@llc_edrpou': agreement[6],
+                '@llc_iban': agreement[7],
+                '@bank_account_detail_llc': agreement[8],
+                '@llc_inn': agreement[9],
+                '@llc_shortname': agreement[10],
+                '@ri_address': agreement[14],
+                '@ri_iban': agreement[15],
+                '@bank_account_detail_ri': agreement[16],
+                '@ri_shortname': agreement[17]
+            }
+
+            # Замена текста в шаблоне
+            self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
+
+            # Сохранение документа
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
+
+            # Формируем название файла
+            file_name = f"{agreement[1]}_Договір.docx"
+
+            # Отправка документа клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
+
+        @self.app.route('/llc_acts/<int:agreement_id>/generate_llc_appendix', methods=['GET'])
+        @basic_auth_required()
+        async def generate_llc_appendix(agreement_id):
+            # Получаем данные по договору
+            agreement_query = """
+            SELECT la.id, la.agreement_name, la.agreement_date, 
+                   lc.name AS llc_name, lc.edrpou AS llc_edrpou, 
+                   lc.address AS llc_address, lc.iban AS llc_iban, lc.bank_account_detail AS bank_account_detail_llc, 
+                   lc.name_short AS llc_shortname, ri.id AS engineer_id, lc.id AS llc_id, lc.in_persona, ri.name, ri.inn,
+                   ri.pidstava, ri.address AS ri_address, ri.iban, ri.bank_account_detail, ri.name_short, lc.inn
+            FROM credentials.llc_agreements AS la
+            JOIN credentials.llc_credentials AS lc ON la.llc_id = lc.id
+            JOIN credentials.ri_credentials AS ri ON la.ri_id = ri.id
+            WHERE la.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+            print(agreement_data)
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            agreement = agreement_data[0]
+            llc_edrpou = agreement[4]
+
+            # Выбираем запросы в зависимости от ЕДРПОУ
+            if llc_edrpou == 38736443:
+                model_query = """
+                SELECT sw.model, COUNT(DISTINCT sw.ip)
+                FROM dbsyphon.switches_report sw
+                JOIN credentials.engineer_cantons ct ON sw.canton = ct.canton
+                WHERE sw.switch_rank IN (1,2) AND ct.engineer_id = %s
+                GROUP BY 1;
+                """
+                ip_pool_query = """
+                SELECT CONCAT(SUBSTRING_INDEX(sr.ip, '.', 3), '.0/24') AS ip_pool
+                FROM dbsyphon.switches_report sr
+                JOIN credentials.engineer_cantons ct ON sr.canton = ct.canton
+                WHERE sr.switch_rank IN (1,2) AND ct.engineer_id = %s
+                GROUP BY ip_pool;
+                """
+                query_param = agreement[9]  # engineer_id
+            else:
+                model_query = """
+                SELECT sw.model, COUNT(DISTINCT sw.ip)
+                FROM dbsyphon.switches_report sw
+                JOIN credentials.llc_cantons ct ON sw.canton = ct.canton
+                WHERE sw.switch_rank IN (3,4) AND ct.llc_id = %s
+                GROUP BY 1;
+                """
+                ip_pool_query = """
+                SELECT CONCAT(SUBSTRING_INDEX(sr.ip, '.', 3), '.0/24') AS ip_pool
+                FROM dbsyphon.switches_report sr
+                JOIN credentials.llc_cantons ct ON sr.canton = ct.canton
+                WHERE sr.switch_rank IN (3,4) AND ct.llc_id = %s
+                GROUP BY ip_pool;
+                """
+                query_param = agreement[10]  # llc_id
+
+            # Выполняем запросы
+            data_table1 = await self.local_db.execute_query(model_query, (query_param,))
+            data_table2 = await self.local_db.execute_query(ip_pool_query, (query_param,))
+
+            # Загружаем шаблон документа
+            template_path = 'static/docs/llc_appendix.docx'
+            doc = Document(template_path)
+
+            # Форматируем дату договора
+            agreement_date_str, month_ukr_name, year, _ = self.format_date(agreement[2])
+
+            # Заполняем заменяемые поля
+            replacements = {
+                '@agr_num': agreement[0],
+                '@agr_name': agreement[1],
+                '@agr_date': agreement_date_str,
+                '@llc_name': agreement[3],
+                '@persona': agreement[11],
+                '@ri_name': agreement[12],
+                '@ri_inn': agreement[13],
+                '@pidstava': agreement[14],
+                '@ri_address': agreement[15],
+                '@ri_iban': agreement[16],
+                '@llc_inn': agreement[19],
+                '@bank_account_detail_ri': agreement[17],
+                '@ri_shortname': agreement[18],
+                '@llc_edrpou': llc_edrpou,
+                '@llc_address': agreement[5],
+                '@llc_iban': agreement[6],
+                '@bank_account_detail_llc': agreement[7],
+                '@llc_shortname': agreement[8]
+            }
+
+            # Выполняем замену в шаблоне
+            self.replace_text_in_document(doc, replacements)
+            self.replace_in_tables(doc.tables, replacements)
+            self.formatting_text(doc)
+
+            # Создаём таблицы
+            table1 = self.create_table(doc, data_table1, ['Модель обладнання', 'Кількість'])
+            table2 = self.create_table(doc, data_table2, ['Діапазон ІР адрес'])
+
+            # Вставляем таблицы в документ
+            self.replace_table_in_document(doc, '@table1', table1)
+            self.replace_table_in_document(doc, '@table2', table2)
+
+            # Сохраняем документ в память
+            doc_io = BytesIO()
+            doc.save(doc_io)
+            doc_io.seek(0)
+
+            # Формируем название файла
+            file_name = f"{agreement[1]}_Додаток.docx"
+
+            # Отправляем файл клиенту
+            return await send_file(doc_io, as_attachment=True, attachment_filename=file_name)
 
         @self.app.route('/llc_acts/<int:agreement_id>/delete/<int:act_id>', methods=['POST'])
         @basic_auth_required()
@@ -1006,6 +1217,7 @@ class MyApp:
             ]
 
             return await render_template('llc_acts.html', agreement=agreement, acts=acts, agreement_id=agreement_id)
+
 
         @self.app.route('/llc_agreements', methods=['GET'])
         @basic_auth_required()
