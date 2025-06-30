@@ -2510,7 +2510,7 @@ class MyApp:
                 "new_data_count": new_data_count
             })
 
-        @self.app.route('/bdcom_list', methods=['GET'])
+        @self.app.route('/bdcom_list', methods=['POST'])
         async def bdcom_list():
             try:
                 # Очистка таблицы
