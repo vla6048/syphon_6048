@@ -2543,6 +2543,32 @@ class MyApp:
                 traceback.print_exc()
                 return jsonify({"status": "error", "message": str(e)}), 500
 
+        @self.app.route('/bdcom_list/export', methods=['GET'])
+        @basic_auth_required()
+        async def export_bdcom_list():
+            try:
+                # Получаем все записи из bdcom_list
+                query = "SELECT id, ntst_id, ip, login, passwd FROM dbsyphon.bdcom_list;"
+                rows = await self.local_db.execute_query(query)
+
+                # Преобразуем в список словарей
+                result = [
+                    {
+                        "id": row[0],
+                        "ntst_id": row[1],
+                        "ip": row[2],
+                        "login": row[3],
+                        "passwd": row[4]
+                    }
+                    for row in rows
+                ]
+
+                return jsonify(result), 200
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return jsonify({"status": "error", "message": str(e)}), 500
 
         @self.app.route('/sync-switches-report', methods=['GET'])
         async def sync_switches_report():
