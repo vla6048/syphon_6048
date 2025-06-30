@@ -2510,49 +2510,38 @@ class MyApp:
                 "new_data_count": new_data_count
             })
 
-        @self.app.route('/bdcom_list', methods=['POST'])
+        @self.app.route('/bdcom_list', methods=['GET'])
         async def bdcom_list():
             try:
-                # Проверка, существует ли таблица
-                check_table_query = """
-                SELECT COUNT(*) 
-                FROM information_schema.tables 
-                WHERE table_schema = 'dbsyphon' AND table_name = 'bdcom_list';
-                """
-                result = await self.local_db.execute_query(check_table_query)
-                table_exists = result[0][0] == 1
-
-                if not table_exists:
-                    return jsonify({'status': 'error', 'message': 'Таблица dbsyphon.bdcom_list не существует'}), 404
-
                 # Очистка таблицы
                 await self.local_db.execute_query("TRUNCATE TABLE dbsyphon.bdcom_list")
 
-                # Получение данных с remote_db
-                select_query = """
-                SELECT id AS ntst_id, ip, login, PASSWORD AS passwd 
-                FROM mrtg.switches
-                WHERE canton IN (
-                    'Голосеевский', 'Минский', 'Лукьяновский', 'Оболонский',
-                    'Виноградарский', 'Борщаговский', 'Теремковский', 'Святошинский'
-                ) AND model LIKE 'BDCOM%';
+                # Запрос к remote_db
+                remote_query = """
+                    SELECT id AS ntst_id, ip, login, PASSWORD AS passwd
+                    FROM mrtg.switches
+                    WHERE canton IN (
+                        'Голосеевский', 'Минский', 'Лукьяновский', 'Оболонский',
+                        'Виноградарский', 'Борщаговский', 'Теремковский', 'Святошинский'
+                    ) AND model LIKE 'BDCOM%';
                 """
-                remote_data = await self.remote_db.execute_query(select_query)
-
-                if not remote_data:
-                    return jsonify({'status': 'ok', 'message': 'Нет данных для вставки'}), 200
+                results = await self.remote_db.execute_query(remote_query)
 
                 # Вставка в локальную таблицу
                 insert_query = """
-                INSERT INTO dbsyphon.bdcom_list (ntst_id, ip, login, passwd) 
-                VALUES (%s, %s, %s, %s)
+                    INSERT INTO dbsyphon.bdcom_list (ntst_id, ip, login, passwd)
+                    VALUES (%s, %s, %s, %s);
                 """
-                await self.local_db.execute_many(insert_query, remote_data)
+                if results:
+                    for row in results:
+                        await self.local_db.execute_query(insert_query, row)
 
-                return jsonify({'status': 'ok', 'message': 'Данные успешно обновлены'}), 200
+                return jsonify({"status": "success", "inserted": len(results)}), 200
 
             except Exception as e:
-                return jsonify({'status': 'error', 'message': str(e)}), 500
+                import traceback
+                traceback.print_exc()
+                return jsonify({"status": "error", "message": str(e)}), 500
 
 
         @self.app.route('/sync-switches-report', methods=['GET'])
