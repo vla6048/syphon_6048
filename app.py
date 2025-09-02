@@ -1396,6 +1396,20 @@ class MyApp:
             # Перенаправление на страницу добавления договора
             return redirect(url_for('agreement_insertion'))
 
+        @self.app.route('/get_master_inn/<int:master_id>', methods=['GET'])
+        @basic_auth_required()
+        async def get_master_inn(master_id):
+            """
+            Получает ИНН мастера по его ID.
+            """
+            query = "SELECT inn FROM credentials.fop_credentials WHERE id = %s;"
+            result = await self.local_db.execute_query(query, (master_id,))
+
+            if result and result[0]:
+                return jsonify({"inn": result[0][0]}), 200
+            else:
+                return jsonify({"error": "Мастер не найден"}), 404
+
         @self.app.route('/generate_protocols', methods=['POST'])
         @basic_auth_required()
         async def generate_protocols():

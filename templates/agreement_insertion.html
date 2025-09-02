@@ -7,7 +7,7 @@
 <form id="agreementForm" method="POST" action="{{ url_for('submit_agreement') }}">
     <div class="form-group">
         <label for="agreement_name">Название договора:</label>
-        <input type="text" class="form-control" id="agreement_name" name="agreement_name" required>
+        <input type="text" class="form-control" id="agreement_name" name="agreement_name" readonly>
     </div>
 
     <div class="form-group">
@@ -41,6 +41,10 @@
     $(document).ready(function() {
         // Обработчик для автозаполнения поля "Мастер"
         $('#master_name').on('input', function() {
+            // Сброс master_id, если пользователь начал печатать после выбора
+            $('#master_id').val('');
+            $('#agreement_name').val('');
+
             const query = $(this).val();
             if (query.length > 1) {
                 $.ajax({
@@ -70,7 +74,49 @@
             $('#master_name').val(masterName);
             $('#master_id').val(masterId);
             $('#master_suggestions').empty();
+            updateAgreementName();
         });
+
+        // Обработчики для обновления имени договора при смене инженера или даты
+        $('#engineer').on('change', function() {
+            updateAgreementName();
+        });
+
+        $('#agreement_date').on('change', function() {
+            updateAgreementName();
+        });
+
+        // Центральная функция для обновления названия договора
+        async function updateAgreementName() {
+            const masterId = $('#master_id').val();
+            const engineerName = $('#engineer option:selected').text();
+            const agreementDate = $('#agreement_date').val();
+
+            if (masterId && engineerName && agreementDate) {
+                // Получаем инициалы инженера
+                const engineerInitials = engineerName.split(' ').map(name => name.charAt(0)).join('');
+
+                try {
+                    // Асинхронно получаем ИНН мастера с сервера
+                    const response = await fetch(`/get_master_inn/${masterId}`);
+                    const data = await response.json();
+
+                    if (data.inn) {
+                        const masterInn = data.inn;
+                        const year = agreementDate.split('-')[0];
+                        const agreementName = `${engineerInitials}-${masterInn}М/РІ-${year}`;
+                        $('#agreement_name').val(agreementName);
+                    } else {
+                        $('#agreement_name').val('');
+                    }
+                } catch (error) {
+                    console.error("Ошибка при получении ИНН мастера:", error);
+                    $('#agreement_name').val('Ошибка генерации имени');
+                }
+            } else {
+                $('#agreement_name').val('');
+            }
+        }
     });
 </script>
 {% endblock %}
