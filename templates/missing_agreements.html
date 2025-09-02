@@ -18,8 +18,7 @@
                 <td>{{ agreement[4] }}</td> <!-- fop_name -->
                 <td>{{ agreement[11] }}</td> <!-- ri_name -->
                 <td>
-                    <form method="POST" action="{{ url_for('generate_protocols') }}">
-                        <input type="hidden" name="agreement_id" value="{{ agreement[0] }}">
+                    <form method="POST" action="{{ url_for('correct_agreement', id=agreement[0]) }}">
                         <button type="submit">Исправить</button>
                     </form>
                 </td>

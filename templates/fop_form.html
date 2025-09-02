@@ -23,6 +23,7 @@
         <div class="mb-3">
             <label for="inn" class="form-label">ИНН:</label>
             <input type="text" id="inn" name="inn" class="form-control" required>
+            <div id="inn-feedback" class="invalid-feedback"></div>
         </div>
 
         <div class="mb-3">
@@ -69,7 +70,7 @@
             <button type="button" id="add-vetka" class="btn btn-secondary mt-2">+ Добавить ветку</button>
         </div>
 
-        <button type="submit" class="btn btn-primary">Отправить</button>
+        <button type="submit" id="submit-btn" class="btn btn-primary">Отправить</button>
     </form>
 </div>
 
@@ -83,5 +84,58 @@
         newVetkaInput.required = true;
         vetkaFields.appendChild(newVetkaInput);
     });
+    // Получаем элементы формы
+const positionSelect = document.getElementById('position');
+const innInput = document.getElementById('inn');
+const innFeedback = document.getElementById('inn-feedback');
+const submitButton = document.getElementById('submit-btn'); // Получаем кнопку
+
+innInput.addEventListener('input', async () => {
+    const inn = innInput.value;
+    const position = positionSelect.value;
+
+    // По умолчанию отключаем кнопку, пока идёт проверка или если ИНН невалиден
+    submitButton.disabled = true;
+
+    if (inn.length < 8) {
+        innInput.classList.remove('is-valid', 'is-invalid');
+        innFeedback.textContent = '';
+        return;
+    }
+
+    try {
+        const response = await fetch(`/check-inn?inn=${inn}&position=${position}`);
+        const data = await response.json();
+
+        if (data.exists) {
+            // ИНН уже существует
+            innInput.classList.add('is-invalid');
+            innInput.classList.remove('is-valid');
+            innFeedback.textContent = 'Этот ИНН уже зарегистрирован.';
+            submitButton.disabled = true; // Блокируем кнопку
+        } else {
+            // ИНН свободен
+            innInput.classList.add('is-valid');
+            innInput.classList.remove('is-invalid');
+            innFeedback.textContent = 'ИНН свободен.';
+            submitButton.disabled = false; // Разблокируем кнопку
+        }
+    } catch (error) {
+        console.error('Ошибка при проверке ИНН:', error);
+        innInput.classList.remove('is-valid', 'is-invalid');
+        innFeedback.textContent = 'Ошибка проверки.';
+        submitButton.disabled = true; // Блокируем кнопку в случае ошибки
+    }
+});
+
+// Также можно заблокировать кнопку при загрузке страницы, пока ИНН не будет проверен
+document.addEventListener('DOMContentLoaded', () => {
+    submitButton.disabled = true;
+});
+
+// Обработка смены позиции
+positionSelect.addEventListener('change', () => {
+    innInput.dispatchEvent(new Event('input'));
+});
 </script>
 {% endblock %}

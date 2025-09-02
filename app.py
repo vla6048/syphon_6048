@@ -1305,7 +1305,7 @@ class MyApp:
                     proto_sum_caps = self.convert_to_currency_words(fop_change)
 
                     insert_protocol_query = """
-                        INSERT INTO credentials.protocols_test (agreement, proto_date, proto_sum, proto_sum_caps)
+                        INSERT INTO credentials.protocols (agreement, proto_date, proto_sum, proto_sum_caps)
                         VALUES (%s, %s, %s, %s);
                     """
                     await self.local_db.execute_query(insert_protocol_query,
@@ -2290,6 +2290,30 @@ class MyApp:
                         await self.local_db.execute_query(insert_territory_query, (master_id, canton, int(vetka)))
 
                 return jsonify({"message": "Данные успешно добавлены"}), 200
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @self.app.route('/check-inn')
+        async def check_inn():
+            inn = request.args.get('inn')
+            position = request.args.get('position')
+
+            if not inn or not position:
+                return jsonify({"error": "Отсутствуют обязательные параметры"}), 400
+
+            if position == 'Мастер':
+                table = 'credentials.fop_credentials'
+            elif position == 'Инженер':
+                table = 'credentials.ri_credentials'
+            else:
+                return jsonify({"error": "Неверная позиция"}), 400
+
+            try:
+                query = f"SELECT EXISTS(SELECT 1 FROM {table} WHERE inn = %s)"
+                result = await self.local_db.execute_query(query, (inn,))
+                exists = result[0][0]  # Результат запроса (True или False)
+
+                return jsonify({"exists": exists}), 200
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
