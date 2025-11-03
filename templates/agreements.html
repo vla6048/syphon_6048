@@ -7,17 +7,17 @@
     <h1 class="mb-4">Список договоров</h1>
 
     <!-- Форма фильтра -->
-    <form method="get" class="mb-4">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">Фильтры</h5>
+    <form method="get" id="filter-form" class="mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="card-title mb-0">Фильтры для отображения</h5>
             </div>
             <div class="card-body">
                 <div class="row">
                     <!-- Фильтр по инженеру -->
-                    <div class="col-md-12 mb-3">
-                        <label for="engineer_filter" class="form-label">Фильтр по инженеру</label>
-                        <select id="engineer_filter" name="engineer_filter" class="form-select">
+                    <div class="col-md-4 mb-3">
+                        <label for="engineer_filter" class="form-label">Инженер</label>
+                        <select id="engineer_filter" name="engineer_filter" class="form-select filter-trigger">
                             <option value="">Все инженеры</option>
                             {% for engineer in engineers %}
                             <option value="{{ engineer }}" {% if engineer == selected_engineer %}selected{% endif %}>
@@ -28,9 +28,9 @@
                     </div>
 
                     <!-- Фильтр по округу -->
-                    <div class="col-md-12 mb-3">
-                        <label for="canton_filter" class="form-label">Фильтр по округу</label>
-                        <select id="canton_filter" name="canton_filter" class="form-select">
+                    <div class="col-md-4 mb-3">
+                        <label for="canton_filter" class="form-label">Округ</label>
+                        <select id="canton_filter" name="canton_filter" class="form-select filter-trigger">
                             <option value="">Все округа</option>
                             {% for canton in cantons %}
                             <option value="{{ canton }}" {% if canton == selected_canton %}selected{% endif %}>
@@ -41,9 +41,9 @@
                     </div>
 
                     <!-- Фильтр по состоянию договора -->
-                    <div class="col-md-12 mb-3">
+                    <div class="col-md-4 mb-3">
                         <label for="state_filter" class="form-label">Состояние договора</label>
-                        <select id="state_filter" name="state_filter" class="form-select">
+                        <select id="state_filter" name="state_filter" class="form-select filter-trigger">
                             <option value="all" {% if selected_state == 'all' %}selected{% endif %}>Все</option>
                             <option value="active" {% if selected_state == 'active' %}selected{% endif %}>Только активные</option>
                             <option value="inactive" {% if selected_state == 'inactive' %}selected{% endif %}>Только неактивные</option>
@@ -53,15 +53,88 @@
 
                 <div class="row mt-3">
                     <div class="col-md-12 text-end">
-                        <button type="submit" class="btn btn-primary">Применить фильтры</button>
-                        <a href="{{ url_for('agreements') }}" class="btn btn-secondary">Сбросить фильтры</a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-filter"></i> Применить фильтры
+                        </button>
+                        <a href="{{ url_for('agreements') }}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Сбросить
+                        </a>
                     </div>
                 </div>
             </div>
         </div>
     </form>
 
+    <!-- 🟢 НОВАЯ ФОРМА: МАССОВАЯ ЗАГРУЗКА -->
+    <div class="card shadow-sm mt-5">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="card-title mb-0">Массовая загрузка протоколов и актов (Архив ZIP)</h5>
+            <p class="mb-0 small">Требуется указать Инженера, Округ, Состояние, Месяц и Год.</p>
+        </div>
+        <div class="card-body">
+            <form id="download-form-proto" action="{{ url_for('download_archive') }}" method="post" class="d-inline-block me-3">
+
+                {# Скрытые поля для передачи текущих фильтров #}
+                <input type="hidden" name="engineer_filter" id="download_engineer_filter" value="{{ selected_engineer }}">
+                <input type="hidden" name="canton_filter" id="download_canton_filter" value="{{ selected_canton }}">
+                <input type="hidden" name="state_filter" id="download_state_filter" value="{{ selected_state }}">
+                <input type="hidden" name="doc_type" value="protocol">
+
+                <div class="row g-3 align-items-end">
+                    <!-- Выбор Месяца -->
+                    <div class="col-md-3">
+                        <label for="month_filter" class="form-label">Месяц протокола</label>
+                        <select id="month_filter" name="month_filter" class="form-select required-download-filter">
+                            <option value="">Выберите месяц</option>
+                            {% for number, name in months %}
+                            <option value="{{ number }}" {% if selected_month == number|string %}selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Выбор Года -->
+                    <div class="col-md-3">
+                        <label for="year_filter" class="form-label">Год протокола</label>
+                        <select id="year_filter" name="year_filter" class="form-select required-download-filter">
+                            <option value="">Выберите год</option>
+                            {% for year in all_years %}
+                            <option value="{{ year }}" {% if selected_year == year|string %}selected{% endif %}>{{ year }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Кнопка Протоколы -->
+                    <div class="col-md-3">
+                        <button type="submit" id="download-protocols-btn" class="btn btn-success w-100" disabled>
+                            <i class="fas fa-file-contract"></i> Скачать Протоколы (.zip)
+                        </button>
+                    </div>
+
+                    <!-- Кнопка Акты (отдельная форма, чтобы передать doc_type='act') -->
+                    <div class="col-md-3">
+                        <button type="submit" id="download-acts-btn" class="btn btn-warning text-dark w-100"
+                            form="download-form-act" disabled>
+                            <i class="fas fa-file-signature"></i> Скачать Акты (.zip)
+                        </button>
+                    </div>
+                </div>
+            </form>
+
+            <form id="download-form-act" action="{{ url_for('download_archive') }}" method="post" class="d-none">
+                <input type="hidden" name="engineer_filter" value="{{ selected_engineer }}">
+                <input type="hidden" name="canton_filter" value="{{ selected_canton }}">
+                <input type="hidden" name="state_filter" value="{{ selected_state }}">
+                <input type="hidden" name="month_filter" id="act_month_filter">
+                <input type="hidden" name="year_filter" id="act_year_filter">
+                <input type="hidden" name="doc_type" value="act">
+            </form>
+        </div>
+    </div>
+    <!-- 🟢 КОНЕЦ НОВОЙ ФОРМЫ -->
+
+
     {% if agreements %}
+    <h3 class="mt-5">Отфильтрованные договоры ({{ agreements|length }})</h3>
     <div class="table-responsive">
         <table class="table table-striped table-bordered">
             <thead>
@@ -105,7 +178,67 @@
         </table>
     </div>
     {% else %}
-    <p>Нет договоров для отображения.</p>
+    <p class="mt-4">Нет договоров для отображения.</p>
     {% endif %}
 </div>
+
+<!-- JavaScript для активации кнопок загрузки -->
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const engineerFilter = document.getElementById('engineer_filter');
+        const cantonFilter = document.getElementById('canton_filter');
+        const stateFilter = document.getElementById('state_filter');
+        const monthFilter = document.getElementById('month_filter');
+        const yearFilter = document.getElementById('year_filter');
+
+        const downloadProtoBtn = document.getElementById('download-protocols-btn');
+        const downloadActsBtn = document.getElementById('download-acts-btn');
+
+        const downloadEngineerHidden = document.getElementById('download_engineer_filter');
+        const downloadCantonHidden = document.getElementById('download_canton_filter');
+        const downloadStateHidden = document.getElementById('download_state_filter');
+
+        const actMonthHidden = document.getElementById('act_month_filter');
+        const actYearHidden = document.getElementById('act_year_filter');
+
+
+        function checkAndToggleDownloadButtons() {
+            // 1. Проверяем основные фильтры (Engineer, Canton, State)
+            const baseFiltersSet = engineerFilter.value !== '' &&
+                                   cantonFilter.value !== '' &&
+                                   stateFilter.value !== 'all';
+
+            // 2. Проверяем фильтры даты
+            const dateFiltersSet = monthFilter.value !== '' &&
+                                   yearFilter.value !== '';
+
+            const canDownload = baseFiltersSet && dateFiltersSet;
+
+            // 3. Установка состояния кнопок
+            downloadProtoBtn.disabled = !canDownload;
+            downloadActsBtn.disabled = !canDownload;
+
+            // 4. Синхронизация полей формы (важно для POST-запроса)
+            if (baseFiltersSet) {
+                downloadEngineerHidden.value = engineerFilter.value;
+                downloadCantonHidden.value = cantonFilter.value;
+                downloadStateHidden.value = stateFilter.value;
+            }
+
+            // Синхронизация полей даты между формами
+            actMonthHidden.value = monthFilter.value;
+            actYearHidden.value = yearFilter.value;
+        }
+
+        // Привязываем слушателей к изменению всех 5 фильтров
+        engineerFilter.addEventListener('change', checkAndToggleDownloadButtons);
+        cantonFilter.addEventListener('change', checkAndToggleDownloadButtons);
+        stateFilter.addEventListener('change', checkAndToggleDownloadButtons);
+        monthFilter.addEventListener('change', checkAndToggleDownloadButtons);
+        yearFilter.addEventListener('change', checkAndToggleDownloadButtons);
+
+        // Инициализация при загрузке страницы
+        checkAndToggleDownloadButtons();
+    });
+</script>
 {% endblock %}

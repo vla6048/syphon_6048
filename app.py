@@ -135,6 +135,11 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/download_archive')
+        @basic_auth_required()
+        async def download_archive():
+            pass
+
         @self.app.route('/check_payments', methods=['GET', 'POST'])
         @basic_auth_required()
         async def check_payments():
