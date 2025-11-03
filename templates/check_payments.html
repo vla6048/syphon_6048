@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Сверка платежей{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h2 class="mb-4">Сверка протоколов для платежей</h2>
+
+        {# Форма фильтров (без изменений) #}
+        <form method="POST" action="{{ url_for('check_payments') }}" class="mb-4 p-3 border rounded bg-light">
+            <div class="form-row align-items-end">
+                <div class="form-group col-md-3">
+                    <label for="month">Месяц</label>
+                    <select id="month" name="month" class="form-control" required>
+                        <option value="">Выберите месяц</option>
+                        {% for number, name in months %}
+                        <option value="{{ number }}" {% if selected_month == number|string %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group col-md-3">
+                    <label for="year">Год</label>
+                    <select id="year" name="year" class="form-control" required>
+                        <option value="">Выберите год</option>
+                        {% for year in years %}
+                        <option value="{{ year }}" {% if selected_year == year|string %}selected{% endif %}>{{ year }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group col-md-4">
+                    <label for="engineer_inn">Инженер (необязательно)</label>
+                    <select id="engineer_inn" name="engineer_inn" class="form-control">
+                        <option value="">Все инженеры</option>
+                        {% for name, inn in engineers %}
+                        <option value="{{ inn }}" {% if selected_engineer_inn == inn|string %}selected{% endif %}>{{ name }} ({{ inn }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group col-md-2">
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <i class="fas fa-search"></i> Найти протоколы
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        {% if grouped_results %}
+        <h4 class="mt-4">Результаты сверки (Общий итог: **{{ "{:,.2f}".format(grand_total) }}**)</h4>
+        <div class="table-responsive">
+            <table class="table table-striped table-bordered table-sm">
+                <thead class="thead-dark">
+                    <tr>
+                        <th style="width:12%">Кантоны</th>
+                        <th style="width:5%">Статус</th> <th style="width:13%">№ Договора</th>
+                        <th>ФОП (Мастер)</th>
+                        <th>ИНН ФОП</th>
+                        <th>Инженер (RI)</th>
+                        <th>ИНН Инженера</th>
+                        <th style="width:13%" class="text-right">Сумма Протокола</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    {% for canton, data in grouped_results.items() %}
+                        <tr>
+                            <td colspan="8" class="table-info font-weight-bold text-center">
+                                КАНТОН: {{ canton }}
+                            </td>
+                        </tr>
+
+                        {# Итерация по записям внутри кантона #}
+                        {% for item in data.records %}
+                        <tr>
+                            <td>{{ item.cantons | default('Нет данных', true) }}</td>
+
+                            <td class="text-center">
+                                {% if item.agreement_state == 1 %}
+                                    ✅
+                                {% else %}
+                                    ❌
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                <a href="{{ url_for('protocols', agreement_id=item.agreement_id) }}" target="_blank">
+                                    {{ item.agreement_name }}
+                                </a>
+                            </td>
+
+                            <td>{{ item.fop_name }}</td>
+                            <td>{{ item.fop_inn }}</td>
+                            <td>{{ item.ri_name }}</td>
+                            <td>{{ item.ri_inn }}</td>
+                            <td class="text-right">{{ "{:,.2f}".format(item.proto_sum) }}</td>
+                        </tr>
+                        {% endfor %}
+
+                        {# Промежуточный итог для кантона #}
+                        <tr class="table-success font-weight-bold">
+                            <td colspan="7" class="text-right">ИТОГО по {{ canton }}:</td>
+                            <td class="text-right">{{ "{:,.2f}".format(data.total) }}</td>
+                        </tr>
+                    {% endfor %}
+
+                    {# Общий итог в конце таблицы #}
+                    <tr class="bg-dark text-white font-weight-bold">
+                        <td colspan="7" class="text-right">ОБЩИЙ ИТОГ (Все кантоны):</td>
+                        <td class="text-right">{{ "{:,.2f}".format(grand_total) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        {% elif selected_month and selected_year %}
+        <div class="alert alert-info" role="alert">
+            Нет протоколов для выбранных месяца и года.
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}

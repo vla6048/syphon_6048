@@ -135,6 +135,142 @@ class MyApp:
 
     def setup_routes(self):
 
+        @self.app.route('/check_payments', methods=['GET', 'POST'])
+        @basic_auth_required()
+        async def check_payments():
+            # Шаг 1: Получение списка инженеров для фильтра (без изменений)
+            engineers_query = "SELECT name, inn FROM credentials.ri_credentials;"
+            engineers_data = await self.local_db.execute_query(engineers_query)
+            engineers = [(row[0], row[1]) for row in engineers_data]
+
+            # Данные для формы (без изменений)
+            current_year = date.today().year
+            years = list(range(2024, current_year + 2))
+            months_data = {
+                1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель", 5: "Май", 6: "Июнь",
+                7: "Июль", 8: "Август", 9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+            }
+
+            # Инициализация переменных
+            grouped_results = {}
+            selected_month = None
+            selected_year = None
+            selected_engineer_inn = None
+            grand_total = 0.0
+
+            if request.method == 'POST':
+                form_data = await request.form
+                selected_month = form_data.get('month')
+                selected_year = form_data.get('year')
+                selected_engineer_inn = form_data.get('engineer_inn')
+
+                if not selected_month or not selected_year:
+                    await flash("Пожалуйста, выберите месяц и год.", "error")
+                    return redirect(url_for('check_payments'))
+
+                # Шаг 3: Обновленный SQL-запрос
+                query = """
+                        SELECT GROUP_CONCAT(DISTINCT ft.canton SEPARATOR ', ') AS cantons, \
+                               agr.agreement_name, \
+                               fc.name                                         AS fop_name, \
+                               fc.inn                                          AS fop_inn, \
+                               rc.name                                         AS ri_name, \
+                               rc.inn                                          AS ri_inn, \
+                               prot.proto_sum, \
+                               agr.id, \
+                               agr.agreement_state
+                        FROM credentials.agreements agr
+                                 JOIN credentials.fop_credentials fc ON agr.master_id = fc.id
+                                 JOIN credentials.ri_credentials rc ON agr.ri_id = rc.id
+                                 JOIN credentials.protocols prot ON agr.id = prot.agreement
+                                 LEFT JOIN credentials.fop_territory ft ON agr.master_id = ft.master_id
+                        WHERE YEAR (prot.proto_date) = %s
+                          AND MONTH (prot.proto_date) = %s
+                          AND prot.proto_state = 1 \
+                        """
+                params = [selected_year, selected_month]
+
+                if selected_engineer_inn:
+                    # ❗ Важно: в этой строке перед AND должен быть пробел, он есть в конце многострочного литерала выше.
+                    query += " AND rc.inn = %s"
+                    params.append(selected_engineer_inn)
+
+                query += """
+        GROUP BY
+            agr.agreement_name,
+            fc.name, fc.inn,
+            rc.name, rc.inn,
+            prot.proto_sum,
+            agr.id,
+            agr.agreement_state
+        ORDER BY 
+            cantons;
+        """
+
+                # Временно выведем запрос для отладки, если ошибка не исчезнет:
+                # print("--- SQL Query Start ---")
+                # print(query % tuple(params))
+                # print("--- SQL Query End ---")
+
+                results_data = await self.local_db.execute_query(query, tuple(params))
+
+                # Шаг 4: Группировка результатов по кантону и подсчет промежуточных сумм
+                if results_data:
+                    current_canton = None
+                    canton_total = 0.0
+
+                    # 9 колонок в результате (cantons, agreement_name, fop_name, fop_inn, ri_name, ri_inn, proto_sum, agr_id, agr_state)
+                    for row in results_data:
+                        cantons_str = row[0] if row[0] is not None else 'Нет кантона'
+                        proto_sum = float(row[6])
+                        agr_id = row[7]
+                        agr_state = row[8]
+
+                        # Если кантон изменился, сохраняем предыдущий итог
+                        if cantons_str != current_canton and current_canton is not None:
+                            grouped_results[current_canton]['total'] = canton_total
+                            canton_total = 0.0
+
+                        if cantons_str not in grouped_results:
+                            grouped_results[cantons_str] = {'records': [], 'total': 0.0}
+
+                        grouped_results[cantons_str]['records'].append({
+                            'cantons': cantons_str,
+                            'agreement_name': row[1],
+                            'fop_name': row[2],
+                            'fop_inn': row[3],
+                            'ri_name': row[4],
+                            'ri_inn': row[5],
+                            'proto_sum': proto_sum,
+                            'agreement_id': agr_id,
+                            'agreement_state': agr_state
+                        })
+
+                        canton_total += proto_sum
+                        grand_total += proto_sum
+                        current_canton = cantons_str
+
+                    # Сохраняем итог для последнего кантона
+                    if current_canton is not None:
+                        grouped_results[current_canton]['total'] = canton_total
+
+                    await flash(f"Найдено {len(results_data)} записей для сверки.", "success")
+                else:
+                    await flash("Протоколы для выбранных критериев не найдены.", "info")
+
+            # Шаг 5: Отображение шаблона
+            return await render_template(
+                'check_payments.html',
+                months=months_data.items(),
+                years=years,
+                engineers=engineers,
+                grouped_results=grouped_results,
+                grand_total=grand_total,
+                selected_month=selected_month,
+                selected_year=selected_year,
+                selected_engineer_inn=selected_engineer_inn
+            )
+
         @self.app.route('/get_unified_values/<related_table>', methods=['GET'])
         @basic_auth_required()
         async def get_unified_values(related_table):
