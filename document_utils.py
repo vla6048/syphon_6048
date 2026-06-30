@@ -1,21 +1,59 @@
+from docx.oxml.ns import qn
 from docx.shared import Pt
+from openpyxl.styles import PatternFill
 from num2words import num2words
+
+
+def _replace_in_paragraph(paragraph, replacements):
+    for key, value in replacements.items():
+        replacement = str(value)
+
+        while key in paragraph.text:
+            start = paragraph.text.find(key)
+            end = start + len(key)
+            current = 0
+            start_run = start_offset = end_run = end_offset = None
+
+            for idx, run in enumerate(paragraph.runs):
+                run_end = current + len(run.text)
+
+                if start_run is None and current <= start < run_end:
+                    start_run = idx
+                    start_offset = start - current
+
+                if current < end <= run_end:
+                    end_run = idx
+                    end_offset = end - current
+                    break
+
+                current = run_end
+
+            if start_run is None or end_run is None:
+                break
+
+            runs = paragraph.runs
+            if start_run == end_run:
+                run = runs[start_run]
+                run.text = run.text[:start_offset] + replacement + run.text[end_offset:]
+            else:
+                first_run = runs[start_run]
+                last_run = runs[end_run]
+                first_run.text = first_run.text[:start_offset] + replacement + last_run.text[end_offset:]
+                for idx in range(start_run + 1, end_run + 1):
+                    runs[idx].text = ""
 
 
 def replace_text_in_document(doc, replacements):
     for paragraph in doc.paragraphs:
-        for key, value in replacements.items():
-            if key in paragraph.text:
-                paragraph.text = paragraph.text.replace(key, str(value))
+        _replace_in_paragraph(paragraph, replacements)
 
 
 def replace_in_tables(tables, replacements):
     for table in tables:
         for row in table.rows:
             for cell in row.cells:
-                for key, value in replacements.items():
-                    if key in cell.text:
-                        cell.text = cell.text.replace(key, str(value))
+                for paragraph in cell.paragraphs:
+                    _replace_in_paragraph(paragraph, replacements)
                 if cell.tables:
                     replace_in_tables(cell.tables, replacements)
 
@@ -25,6 +63,49 @@ def formatting_text(document):
         for run in paragraph.runs:
             run.font.name = 'Times New Roman'
             run.font.size = Pt(11)
+
+
+def _remove_xml_children(element, child_tags):
+    if element is None:
+        return
+
+    for child_tag in child_tags:
+        for child in list(element.findall(qn(child_tag))):
+            element.remove(child)
+
+
+def _clear_paragraph_highlights(paragraph):
+    _remove_xml_children(paragraph._p.pPr, ("w:shd",))
+
+    for run in paragraph.runs:
+        run.font.highlight_color = None
+        _remove_xml_children(run._r.rPr, ("w:highlight", "w:shd"))
+
+
+def clear_document_highlights(document):
+    for paragraph in document.paragraphs:
+        _clear_paragraph_highlights(paragraph)
+
+    for table in document.tables:
+        clear_table_highlights(table)
+
+
+def clear_table_highlights(table):
+    for row in table.rows:
+        for cell in row.cells:
+            _remove_xml_children(cell._tc.tcPr, ("w:shd",))
+            for paragraph in cell.paragraphs:
+                _clear_paragraph_highlights(paragraph)
+            for nested_table in cell.tables:
+                clear_table_highlights(nested_table)
+
+
+def clear_workbook_highlights(workbook):
+    empty_fill = PatternFill(fill_type=None)
+    for sheet in workbook.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                cell.fill = empty_fill
 
 
 def convert_to_currency_words(amount):

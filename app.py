@@ -21,6 +21,8 @@ import openpyxl
 import uuid
 from document_utils import (
     amount_to_time,
+    clear_document_highlights,
+    clear_workbook_highlights,
     convert_to_currency_words,
     create_table,
     format_date,
@@ -1563,6 +1565,7 @@ class MyApp:
             self.replace_text_in_document(document, replacements)
             self.replace_in_tables(document.tables, replacements)
             self.formatting_text(document)
+            clear_document_highlights(document)
 
             output = BytesIO()
             document.save(output)
@@ -1625,6 +1628,7 @@ class MyApp:
             self.replace_text_in_document(document, replacements)
             self.replace_in_tables(document.tables, replacements)
             self.formatting_text(document)
+            clear_document_highlights(document)
 
             output = BytesIO()
             document.save(output)
@@ -1682,6 +1686,7 @@ class MyApp:
                         for key, replacement in replacements.items():
                             if key in cell.value:
                                 cell.value = cell.value.replace(key, str(replacement))
+            clear_workbook_highlights(workbook)
 
             output = BytesIO()
             workbook.save(output)
