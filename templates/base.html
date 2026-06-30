@@ -51,6 +51,7 @@
                         <a class="dropdown-item" href="{{ url_for('agreements') }}">Просмотр договоров</a>
                         <a class="dropdown-item" href="{{ url_for('llc_agreements') }}">Просмотр договоров ТОВ</a>
                         <a class="dropdown-item" href="{{ url_for('check_payments') }}">Сверка платежей</a>
+                        <a class="dropdown-item" href="{{ url_for('kdn_new') }}">кдн new</a>
                     </div>
                 </li>
 
@@ -62,6 +63,10 @@
                     <div class="dropdown-menu" aria-labelledby="zipDropdown">
                         <a class="dropdown-item" href="{{ url_for('equipment_insertion') }}">Внесение оборудования</a>
                     </div>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('api_test') }}">api test</a>
                 </li>
             </ul>
         </div>

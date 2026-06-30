@@ -3,32 +3,95 @@ from quart_auth import QuartAuth, basic_auth_required
 from docx import Document
 from aiohttp import web
 import aiomysql
-from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.enum.table import WD_ALIGN_VERTICAL
 from dotenv import load_dotenv
-from num2words import num2words
 from datetime import date, datetime
+import asyncio
 import os
 import calendar
+import tempfile
 from io import BytesIO
+from pathlib import Path
 import pandas as pd
 from db_manager import DatabaseManager
 import random
 from math import floor
 import openpyxl
 import uuid
+from document_utils import (
+    amount_to_time,
+    convert_to_currency_words,
+    create_table,
+    format_date,
+    formatting_text,
+    replace_in_tables,
+    replace_table_in_document,
+    replace_text_in_document,
+)
+from sql_utils import build_placeholders, quote_qualified_identifier
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
 
 
+async def convert_office_bytes_to_pdf(source_bytes, source_suffix):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        source_path = temp_path / f"document{source_suffix}"
+        pdf_path = temp_path / "document.pdf"
+        profile_path = temp_path / "lo-profile"
+        runtime_path = temp_path / "runtime"
+        config_path = temp_path / "config"
+        cache_path = temp_path / "cache"
+        runtime_path.mkdir(mode=0o700)
+        config_path.mkdir()
+        cache_path.mkdir()
+        source_path.write_bytes(source_bytes)
+
+        env = os.environ.copy()
+        env["HOME"] = str(temp_path)
+        env["XDG_RUNTIME_DIR"] = str(runtime_path)
+        env["XDG_CONFIG_HOME"] = str(config_path)
+        env["XDG_CACHE_HOME"] = str(cache_path)
+
+        process = await asyncio.create_subprocess_exec(
+            "soffice",
+            "--headless",
+            f"-env:UserInstallation={profile_path.as_uri()}",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(temp_path),
+            str(source_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0 or not pdf_path.exists():
+            output = (stderr or stdout).decode("utf-8", errors="replace")
+            raise RuntimeError(f"LibreOffice PDF conversion failed: {output}")
+
+        return pdf_path.read_bytes()
+
+
 class MyApp:
+    replace_text_in_document = staticmethod(replace_text_in_document)
+    replace_in_tables = staticmethod(replace_in_tables)
+    formatting_text = staticmethod(formatting_text)
+    convert_to_currency_words = staticmethod(convert_to_currency_words)
+    format_date = staticmethod(format_date)
+    amount_to_time = staticmethod(amount_to_time)
+    create_table = staticmethod(create_table)
+    replace_table_in_document = staticmethod(replace_table_in_document)
+
     def __init__(self):
         # Создание экземпляра Quart
         self.app = Quart(__name__)
         QuartAuth(self.app)
-        self.app.secret_key = os.urandom(24)
+        self.app.secret_key = os.getenv('SECRET_KEY') or os.urandom(24)
         self.app.config["QUART_AUTH_BASIC_USERNAME"] = os.getenv('BUSERNAME')
         self.app.config["QUART_AUTH_BASIC_PASSWORD"] = os.getenv('BPASSWD')
 
@@ -50,88 +113,16 @@ class MyApp:
         bp = Blueprint('generate_protocols', __name__)
         # Настройка маршрутов
         self.setup_routes()
+        self.setup_lifecycle()
 
     async def __call__(self, scope, receive, send):
         await self.app(scope, receive, send)
 
-    #функции для роутов
-    def replace_text_in_document(self, doc, replacements):
-        # Заміна у всіх параграфах документа
-        for paragraph in doc.paragraphs:
-            for key, value in replacements.items():
-                if key in paragraph.text:
-                    paragraph.text = paragraph.text.replace(key, str(value))
-
-    def replace_in_tables(self, tables, replacements):
-        for table in tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for key, value in replacements.items():
-                        if key in cell.text:
-                            cell.text = cell.text.replace(key, str(value))
-                    # Перевірка на вкладені таблиці та рекурсивний виклик
-                    if cell.tables:
-                        self.replace_in_tables(cell.tables, replacements)
-
-    def formatting_text(self, document):
-        for paragraph in document.paragraphs:
-            for run in paragraph.runs:
-                run.font.name = 'Times New Roman'
-                run.font.size = Pt(11)
-
-    def convert_to_currency_words(self, amount):
-        hryvnia_part = int(amount)
-        kopiyka_part = int(round((amount - hryvnia_part) * 100))
-        hryvnia_words = num2words(hryvnia_part, lang='uk')
-        kopiyka_words = num2words(kopiyka_part, lang='uk')
-        return f"{hryvnia_words} гривень {kopiyka_words} копійок"
-
-    def format_date(self, date):
-        months_ukr = {
-            1: 'січня', 2: 'лютого', 3: 'березня', 4: 'квітня', 5: 'травня', 6: 'червня',
-            7: 'липня', 8: 'серпня', 9: 'вересня', 10: 'жовтня', 11: 'листопада', 12: 'грудня'
-        }
-        day = date.strftime("%d")
-        month = months_ukr[date.month]
-        year = date.strftime("%Y")
-        return f"{day} {month} {year} року", month, year, day
-
-    def amount_to_time(self, protocol_amount):
-        work_hours = protocol_amount/1000
-        hours = int(work_hours)
-        minutes = int((work_hours-hours)*60)
-        return f"{hours} годин {minutes} хвилин"
-
-    def create_table(self, doc, data, headers):
-        # Добавление таблицы в документ
-        table = doc.add_table(rows=1, cols=len(headers))
-
-        # Добавление заголовков в таблицу
-        hdr_cells = table.rows[0].cells
-        for idx, header in enumerate(headers):
-            hdr_cells[idx].text = header
-
-        # Добавление данных в таблицу
-        for idx, row in enumerate(data):
-            row_cells = table.add_row().cells
-            for j, val in enumerate(row):
-                row_cells[j].text = str(val)
-
-        return table
-
-    def replace_table_in_document(self, doc, marker, table):
-        # Проходим по всем параграфам документа
-        for paragraph in doc.paragraphs:
-            if marker in paragraph.text:
-                # Удаляем маркер
-                paragraph.clear()
-
-                # Вставляем таблицу в место маркера
-                table_element = table._element
-                paragraph._element.addnext(table_element)  # Вставляем таблицу после параграфа
-                break
-        return doc
-
+    def setup_lifecycle(self):
+        @self.app.after_serving
+        async def close_database_pools():
+            await self.local_db.close()
+            await self.remote_db.close()
 
     def setup_routes(self):
 
@@ -323,13 +314,20 @@ class MyApp:
 
                 # Вставка в связанную таблицу (если она есть)
                 if related_table and equipment_id:
-                    query_columns = f"SHOW COLUMNS FROM equipments.{related_table}"
+                    try:
+                        quoted_related_table = quote_qualified_identifier(f"equipments.{related_table}")
+                    except ValueError:
+                        return jsonify({"success": False, "error": "Некорректная связанная таблица"}), 400
+
+                    query_columns = f"SHOW COLUMNS FROM {quoted_related_table}"
                     columns_data = await self.local_db.execute_query(query_columns)
                     columns = [col[0] for col in columns_data if col[0] not in ('id', 'equipment_id')]
 
                     related_values = [equipment_id] + [data.get(col) for col in columns]
+                    related_columns = ["equipment_id"] + columns
+                    quoted_columns = ", ".join(quote_qualified_identifier(col) for col in related_columns)
                     insert_related = f"""
-                        INSERT INTO equipments.{related_table} (equipment_id, {', '.join(columns)})
+                        INSERT INTO {quoted_related_table} ({quoted_columns})
                         VALUES ({', '.join(['%s'] * len(related_values))})
                     """
                     await self.local_db.execute_insert(insert_related, related_values)
@@ -353,7 +351,12 @@ class MyApp:
         @self.app.route('/get_fields/<table>', methods=['GET'])
         async def get_fields(table):
             """ Возвращает список полей таблицы (кроме 'id' и 'equipment_id') в формате JSON. """
-            query = f"SHOW COLUMNS FROM equipments.{table}"
+            try:
+                quoted_table = quote_qualified_identifier(f"equipments.{table}")
+            except ValueError:
+                return jsonify({"error": "Некорректное имя таблицы"}), 400
+
+            query = f"SHOW COLUMNS FROM {quoted_table}"
             result = await self.local_db.execute_query(query)
 
             if not result:
@@ -767,7 +770,8 @@ class MyApp:
 
             return redirect(url_for('llc_acts', agreement_id=agreement_id))
 
-        async def handle_llc_logic(act_sum, llc_id, act_id):
+        async def handle_llc_logic(act_sum, llc_id, act_id, data_table="credentials.llc_acts_data"):
+            quoted_data_table = quote_qualified_identifier(data_table)
             # Установленные цены за единицу для каждого ранга
             RANK3_COST = 1000
             RANK4_COST = 500
@@ -854,16 +858,16 @@ class MyApp:
 
             # Запись данных в таблицу `credentials.llc_acts_data`
             # Ранг 3
-            await self.local_db.execute_query("""
-                INSERT INTO credentials.llc_acts_data 
+            await self.local_db.execute_query(f"""
+                INSERT INTO {quoted_data_table}
                 (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 act_id, 3, '\n'.join(rank3_report["models"]), rank3_report["count"], '\n'.join(rank3_report["ips"]), 0))
 
             # Ранг 4
-            await self.local_db.execute_query("""
-                INSERT INTO credentials.llc_acts_data 
+            await self.local_db.execute_query(f"""
+                INSERT INTO {quoted_data_table}
                 (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
@@ -871,8 +875,8 @@ class MyApp:
 
             # Консультация
             if consultation_time_in_float > 0:
-                await self.local_db.execute_query("""
-                    INSERT INTO credentials.llc_acts_data 
+                await self.local_db.execute_query(f"""
+                    INSERT INTO {quoted_data_table}
                     (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (act_id, 0, '\n'.join(consultation_report["models"]), total_consultation_devices,
@@ -884,7 +888,17 @@ class MyApp:
             print(f"Консультация по работе оборудования {str(consultation_report)}")
 
 
-        async def handle_kdn_logic(act_date, act_sum, agreement, ri_id, act_id):
+        async def handle_kdn_logic(
+                act_date,
+                act_sum,
+                agreement,
+                ri_id,
+                act_id,
+                data_table="credentials.llc_acts_data",
+                cantons_table="credentials.engineer_cantons"
+        ):
+            quoted_data_table = quote_qualified_identifier(data_table)
+            quoted_cantons_table = quote_qualified_identifier(cantons_table)
             # Установленная цена за единицу оборудования или времени консультаций
             UNIT_COST = 1000
 
@@ -899,52 +913,35 @@ class MyApp:
             consultation_budget = act_sum * consultation_share
 
             # Получение данных оборудования ранга 1
-            rank1_query = """
-            SELECT group_concat(sw.model separator '\n') AS models_list,
-                   count(sw.id) AS total_count,
-                   group_concat(sw.ip separator '\n') AS ip_list
+            rank1_query = f"""
+            SELECT sw.model, sw.ip
             FROM dbsyphon.switches_report sw
-            JOIN credentials.engineer_cantons cant ON sw.canton = cant.canton
+            JOIN {quoted_cantons_table} cant ON sw.canton = cant.canton
             WHERE sw.switch_rank = 1 AND cant.engineer_id = %s;
             """
             rank1_data = await self.local_db.execute_query(rank1_query, (ri_id,))
-            rank1_models, rank1_count, rank1_ips = rank1_data[0]
 
             # Получение данных оборудования ранга 2
-            rank2_query = """
-            SELECT group_concat(sw.model separator '\n') AS models_list,
-                   count(sw.id) AS total_count,
-                   group_concat(sw.ip separator '\n') AS ip_list
+            rank2_query = f"""
+            SELECT sw.model, sw.ip
             FROM dbsyphon.switches_report sw
-            JOIN credentials.engineer_cantons cant ON sw.canton = cant.canton
+            JOIN {quoted_cantons_table} cant ON sw.canton = cant.canton
             WHERE sw.switch_rank = 2 AND cant.engineer_id = %s;
             """
             rank2_data = await self.local_db.execute_query(rank2_query, (ri_id,))
-            rank2_models, rank2_count, rank2_ips = rank2_data[0]
-
-            # Преобразование данных в списки
-            rank1_models = rank1_models.split("\n") if rank1_models else []
-            rank1_ips = rank1_ips.split("\n") if rank1_ips else []
-            rank2_models = rank2_models.split("\n") if rank2_models else []
-            rank2_ips = rank2_ips.split("\n") if rank2_ips else []
 
             # Вычисление количества необходимых устройств для каждого ранга
-            rank1_units = floor(rank1_budget / UNIT_COST)
-            rank2_units = floor(rank2_budget / UNIT_COST)
+            rank1_units_target = floor(rank1_budget / UNIT_COST)
+            rank2_units_target = floor(rank2_budget / UNIT_COST)
 
-            # Повторение списков для рангов, если это необходимо
-            if rank1_units > len(rank1_models):
-                rank1_models *= (rank1_units // len(rank1_models)) + 1
-                rank1_ips *= (rank1_units // len(rank1_ips)) + 1
-            if rank2_units > len(rank2_models):
-                rank2_models *= (rank2_units // len(rank2_models)) + 1
-                rank2_ips *= (rank2_units // len(rank2_ips)) + 1
-
-            # Срез до нужного количества
-            selected_rank1_models = rank1_models[:rank1_units]
-            selected_rank1_ips = rank1_ips[:rank1_units]
-            selected_rank2_models = rank2_models[:rank2_units]
-            selected_rank2_ips = rank2_ips[:rank2_units]
+            selected_rank1 = random.sample(rank1_data, min(rank1_units_target, len(rank1_data))) if rank1_data else []
+            selected_rank2 = random.sample(rank2_data, min(rank2_units_target, len(rank2_data))) if rank2_data else []
+            rank1_units = len(selected_rank1)
+            rank2_units = len(selected_rank2)
+            selected_rank1_models = [row[0] for row in selected_rank1]
+            selected_rank1_ips = [row[1] for row in selected_rank1]
+            selected_rank2_models = [row[0] for row in selected_rank2]
+            selected_rank2_ips = [row[1] for row in selected_rank2]
 
             # Расчет времени консультаций, если осталась сумма
             remaining_budget = (rank1_budget - rank1_units * UNIT_COST) + \
@@ -975,16 +972,16 @@ class MyApp:
 
             # Запись данных в таблицу `credentials.llc_acts_data`
             # Ранг 1
-            await self.local_db.execute_query("""
-                INSERT INTO credentials.llc_acts_data 
+            await self.local_db.execute_query(f"""
+                INSERT INTO {quoted_data_table}
                 (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 act_id, 1, '\n'.join(rank1_report["models"]), rank1_report["count"], '\n'.join(rank1_report["ips"]), 0))
 
             # Ранг 2
-            await self.local_db.execute_query("""
-                INSERT INTO credentials.llc_acts_data 
+            await self.local_db.execute_query(f"""
+                INSERT INTO {quoted_data_table}
                 (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
@@ -992,8 +989,8 @@ class MyApp:
 
             # Консультации
             if consultation_time_in_float > 0:
-                await self.local_db.execute_query("""
-                    INSERT INTO credentials.llc_acts_data 
+                await self.local_db.execute_query(f"""
+                    INSERT INTO {quoted_data_table}
                     (act_id, sw_rank, model_list, count_devices, ip_list, worktime_float)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (act_id, 0, '\n'.join(consultation_report["models"]), rank1_units + rank2_units,
@@ -1354,6 +1351,356 @@ class MyApp:
 
             return await render_template('llc_acts.html', agreement=agreement, acts=acts, agreement_id=agreement_id)
 
+        @self.app.route('/kdn-new/acts/<int:agreement_id>', methods=['GET', 'POST'])
+        @basic_auth_required()
+        async def kdn_new_acts(agreement_id):
+            if request.method == 'POST':
+                act_date = (await request.form)['act_date']
+                act_sum = (await request.form)['act_sum']
+
+                insert_query = """
+                INSERT INTO credentials.llc_acts_new (agreement, act_date, act_sum, act_state)
+                VALUES (%s, %s, %s, 1);
+                """
+                await self.local_db.execute_query(insert_query, (agreement_id, act_date, act_sum))
+
+                return redirect(url_for('kdn_new_acts', agreement_id=agreement_id))
+
+            agreement_query = """
+            SELECT la.agreement_name, lc.name AS organization_name, lc.edrpou, ri.name AS engineer_name
+            FROM credentials.llc_agreements_new AS la
+            JOIN credentials.llc_credentials AS lc ON la.llc_id = lc.id
+            JOIN credentials.ri_credentials AS ri ON la.ri_id = ri.id
+            WHERE la.id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement_id,))
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            agreement = {
+                'agreement_name': agreement_data[0][0],
+                'organization_name': agreement_data[0][1],
+                'edrpou': agreement_data[0][2],
+                'engineer_name': agreement_data[0][3]
+            }
+
+            acts_query = """
+            SELECT id, act_date, act_sum, act_state
+            FROM credentials.llc_acts_new
+            WHERE agreement = %s AND act_state = 1;
+            """
+            acts_data = await self.local_db.execute_query(acts_query, (agreement_id,))
+
+            if acts_data:
+                act_ids = [act[0] for act in acts_data]
+                placeholders = build_placeholders(act_ids)
+                acts_with_data_query = f"""
+                SELECT DISTINCT act_id
+                FROM credentials.llc_acts_data_new
+                WHERE act_id IN ({placeholders});
+                """
+                acts_with_data = await self.local_db.execute_query(acts_with_data_query, tuple(act_ids))
+                acts_with_data_ids = {row[0] for row in acts_with_data}
+            else:
+                acts_with_data_ids = set()
+
+            acts = [
+                {
+                    'id': act[0],
+                    'act_date': act[1],
+                    'act_sum': act[2],
+                    'act_state': act[3],
+                    'has_data': act[0] in acts_with_data_ids,
+                }
+                for act in acts_data
+            ]
+
+            return await render_template('kdn_new_acts.html', agreement=agreement, acts=acts, agreement_id=agreement_id)
+
+        async def get_kdn_new_act_document_data(act_id):
+            query = """
+            SELECT act.act_date,
+                   act.act_sum,
+                   act.id,
+                   agr.agreement_name,
+                   agr.agreement_date,
+                   llc.name,
+                   llc.edrpou,
+                   ri.name,
+                   ri.iban,
+                   ri.bank_account_detail,
+                   ri.address,
+                   ri.phone,
+                   ri.inn,
+                   ri.name_short,
+                   llc.in_persona,
+                   ri.pidstava,
+                   llc.address,
+                   llc.iban,
+                   llc.bank_account_detail,
+                   llc.inn,
+                   llc.name_short
+            FROM credentials.llc_acts_new act
+            JOIN credentials.llc_agreements_new agr ON act.agreement = agr.id
+            JOIN credentials.llc_credentials llc ON agr.llc_id = llc.id
+            JOIN credentials.ri_credentials ri ON agr.ri_id = ri.id
+            WHERE act.id = %s
+            """
+            result = await self.local_db.execute_query(query, (act_id,))
+            data = result[0] if result else None
+
+            query_acts_data = """
+            SELECT sw_rank, model_list, count_devices, ip_list, worktime_float
+            FROM credentials.llc_acts_data_new
+            WHERE act_id = %s
+            """
+            acts_data_result = await self.local_db.execute_query(query_acts_data, (act_id,))
+            return data, acts_data_result
+
+        @self.app.route('/kdn-new/acts/<int:agreement_id>/generate_data/<int:act_id>', methods=['POST'])
+        @basic_auth_required()
+        async def generate_kdn_new_act_data(agreement_id, act_id):
+            act_query = """
+            SELECT act_date, act_sum, agreement
+            FROM credentials.llc_acts_new
+            WHERE id = %s;
+            """
+            act_data = await self.local_db.execute_query(act_query, (act_id,))
+
+            if not act_data:
+                return "Акт не найден", 404
+
+            act_date, act_sum, agreement = act_data[0]
+
+            agreement_query = """
+            SELECT llc_id, ri_id
+            FROM credentials.llc_agreements_new
+            WHERE id = %s;
+            """
+            agreement_data = await self.local_db.execute_query(agreement_query, (agreement,))
+
+            if not agreement_data:
+                return "Договор не найден", 404
+
+            llc_id, ri_id = agreement_data[0]
+
+            edrpou_query = """
+            SELECT edrpou
+            FROM credentials.llc_credentials
+            WHERE id = %s;
+            """
+            edrpou_data = await self.local_db.execute_query(edrpou_query, (llc_id,))
+
+            if not edrpou_data:
+                return "Организация не найдена", 404
+
+            if edrpou_data[0][0] == 38736443:
+                await handle_kdn_logic(
+                    act_date,
+                    act_sum,
+                    agreement,
+                    ri_id,
+                    act_id,
+                    "credentials.llc_acts_data_new",
+                    "credentials.engineer_cantons_new"
+                )
+            else:
+                await handle_llc_logic(act_sum, llc_id, act_id, "credentials.llc_acts_data_new")
+
+            return redirect(url_for('kdn_new_acts', agreement_id=agreement_id))
+
+        @self.app.route('/kdn-new/acts/<int:act_id>/generate_report_llc', methods=['POST'])
+        @basic_auth_required()
+        async def generate_kdn_new_report_llc(act_id):
+            data, acts_data_result = await get_kdn_new_act_document_data(act_id)
+            if not data:
+                return "Акт не найден", 404
+
+            replacements = {
+                "@act_name": f"R{act_id}_{data[0].strftime('%m/%y')}_{data[3]}",
+                "@act_date": f"«{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]}» {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
+                "@ri_name": data[7],
+                "@ri_iban": data[8],
+                "@bank_account_detail_ri": data[9],
+                "@ri_address": data[10],
+                "@ri_phone": data[11],
+                "@ri_inn": data[12],
+                "@llc_name": data[5],
+                "@llc_edrpou": data[6],
+                "@agr_name": data[3],
+                "@agr_date": self.format_date(data[4])[0],
+                "@act_sum": data[1],
+                "@actsumwords": self.convert_to_currency_words(data[1]),
+                "@ri_shortname": data[13],
+                "@llc_in_persona": data[14],
+                "@ri_pidstava": data[15],
+                "@current_month": self.format_date(data[0])[1],
+                "@current_year": self.format_date(data[0])[2],
+                "@last_day_of_the_month": calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1],
+                "@llc_address": data[16],
+                "@llc_iban": data[17],
+                "@bank_account_detail_llc": data[18],
+                "@llc_inn": data[19],
+                "@llc_shortname": data[20]
+            }
+
+            for row in acts_data_result:
+                if row[0] == 1:
+                    replacements["@rank1_models"] = row[1]
+                    replacements["@rank1_count"] = row[2]
+                    replacements["@rank1_ips"] = row[3]
+                elif row[0] == 2:
+                    replacements["@rank2_models"] = row[1]
+                    replacements["@rank2_count"] = row[2]
+                    replacements["@rank2_ips"] = row[3]
+                elif row[0] == 0:
+                    replacements["@time_models"] = row[1]
+                    replacements["@time_count"] = round(row[4], 2)
+                    replacements["@time_ips"] = row[3]
+
+            document = Document('static/docs/kdn_report.docx')
+            self.replace_text_in_document(document, replacements)
+            self.replace_in_tables(document.tables, replacements)
+            self.formatting_text(document)
+
+            output = BytesIO()
+            document.save(output)
+            pdf_bytes = await convert_office_bytes_to_pdf(output.getvalue(), ".docx")
+            docx_name = f'{data[3]}_Звіт_{self.format_date(data[0])[1]}_{self.format_date(data[0])[2]}'
+            return await send_file(BytesIO(pdf_bytes), as_attachment=True, attachment_filename=f"{docx_name}.pdf",
+                                   mimetype="application/pdf")
+
+        @self.app.route('/kdn-new/acts/<int:act_id>/generate_act', methods=['POST'])
+        @basic_auth_required()
+        async def generate_kdn_new_act(act_id):
+            data, acts_data_result = await get_kdn_new_act_document_data(act_id)
+            if not data:
+                return "Акт не найден", 404
+
+            replacements = {
+                "@act_name": f"A{act_id}_{data[0].strftime('%m/%y')}_{data[3]}",
+                "@act_date": f"«{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]}» {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
+                "@ri_name": data[7],
+                "@ri_iban": data[8],
+                "@bank_account_detail_ri": data[9],
+                "@ri_address": data[10],
+                "@ri_phone": data[11],
+                "@ri_inn": data[12],
+                "@llc_name": data[5],
+                "@llc_edrpou": data[6],
+                "@agr_name": data[3],
+                "@agr_date": self.format_date(data[4])[0],
+                "@act_sum": data[1],
+                "@actsumwords": self.convert_to_currency_words(data[1]),
+                "@ri_shortname": data[13],
+                "@llc_in_persona": data[14],
+                "@ri_pidstava": data[15],
+                "@current_month": self.format_date(data[0])[1],
+                "@current_year": self.format_date(data[0])[2],
+                "@last_day_of_the_month": calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1],
+                "@llc_address": data[16],
+                "@llc_iban": data[17],
+                "@bank_account_detail_llc": data[18],
+                "@llc_inn": data[19],
+                "@llc_shortname": data[20]
+            }
+            sum_rank1 = 0
+            sum_rank2 = 0
+
+            for row in acts_data_result:
+                if row[0] == 1:
+                    replacements["@rank1_count"] = row[2]
+                    replacements["@rank1_sum"] = float(row[2] * 1000)
+                    sum_rank1 = float(row[2] * 1000)
+                elif row[0] == 2:
+                    replacements["@rank2_count"] = row[2]
+                    replacements["@rank2_sum"] = float(row[2] * 1000)
+                    sum_rank2 = float(row[2] * 1000)
+                elif row[0] == 0:
+                    replacements["@time_count"] = round(row[4], 2)
+                    replacements["@time_sum"] = round(float(data[1]) - sum_rank2 - sum_rank1, 2)
+
+            document = Document('static/docs/kdn_act.docx')
+            self.replace_text_in_document(document, replacements)
+            self.replace_in_tables(document.tables, replacements)
+            self.formatting_text(document)
+
+            output = BytesIO()
+            document.save(output)
+            pdf_bytes = await convert_office_bytes_to_pdf(output.getvalue(), ".docx")
+            docx_name = f'{data[3]}_Акт_{self.format_date(data[0])[1]}_{self.format_date(data[0])[2]}'
+            return await send_file(BytesIO(pdf_bytes), as_attachment=True, attachment_filename=f"{docx_name}.pdf",
+                                   mimetype="application/pdf")
+
+        @self.app.route('/kdn-new/acts/<int:act_id>/generate_bill', methods=['POST'])
+        @basic_auth_required()
+        async def generate_kdn_new_bill(act_id):
+            data, acts_data_result = await get_kdn_new_act_document_data(act_id)
+            if not data:
+                return "Акт не найден", 404
+
+            replacements = {
+                "@bill_name": f"B{act_id}_{data[0].strftime('%m/%y')}_{data[3]}",
+                "@bill_date": f"{calendar.monthrange(int(data[0].strftime('%Y')), int(data[0].month))[-1]} {self.format_date(data[0])[1]} {self.format_date(data[0])[2]} року",
+                "@ri_name": data[7],
+                "@ri_iban": data[8],
+                "@bank_account_detail_ri": data[9],
+                "@ri_address": data[10],
+                "@ri_phone": data[11],
+                "@ri_inn": data[12],
+                "@llc_name": data[5],
+                "@llc_edrpou": data[6],
+                "@agr_name": data[3],
+                "@agr_date": self.format_date(data[4])[0],
+                "@bill_sum": data[1],
+                "@handwritebill_sum": self.convert_to_currency_words(data[1]),
+                "@ri_shortname": data[13]
+            }
+            sum_rank1 = 0
+            sum_rank2 = 0
+
+            for row in acts_data_result:
+                if row[0] == 1:
+                    replacements["@rank1_count"] = row[2]
+                    replacements["@rank1_sum"] = float(row[2] * 1000)
+                    sum_rank1 = float(row[2] * 1000)
+                elif row[0] == 2:
+                    replacements["@rank2_count"] = row[2]
+                    replacements["@rank2_sum"] = float(row[2] * 1000)
+                    sum_rank2 = float(row[2] * 1000)
+                elif row[0] == 0:
+                    replacements["@time_count"] = round(row[4], 2)
+                    replacements["@time_sum"] = round(float(data[1]) - sum_rank2 - sum_rank1, 2)
+
+            workbook = openpyxl.load_workbook('static/docs/kdn_bill.xlsx')
+            sheet = workbook.active
+
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        for key, replacement in replacements.items():
+                            if key in cell.value:
+                                cell.value = cell.value.replace(key, str(replacement))
+
+            output = BytesIO()
+            workbook.save(output)
+            pdf_bytes = await convert_office_bytes_to_pdf(output.getvalue(), ".xlsx")
+            xlxs_name = f'{data[3]}_Рахунок_{self.format_date(data[0])[1]}_{self.format_date(data[0])[2]}'
+            return await send_file(BytesIO(pdf_bytes), as_attachment=True, attachment_filename=f"{xlxs_name}.pdf",
+                                   mimetype="application/pdf")
+
+        @self.app.route('/kdn-new/acts/<int:agreement_id>/delete/<int:act_id>', methods=['POST'])
+        @basic_auth_required()
+        async def delete_kdn_new_act(agreement_id, act_id):
+            delete_query = """
+            UPDATE credentials.llc_acts_new
+            SET act_state = 0
+            WHERE id = %s AND agreement = %s;
+            """
+            await self.local_db.execute_query(delete_query, (act_id, agreement_id))
+            return redirect(url_for('kdn_new_acts', agreement_id=agreement_id))
+
 
         @self.app.route('/llc_agreements', methods=['GET'])
         @basic_auth_required()
@@ -1406,6 +1753,52 @@ class MyApp:
 
             # Передаем все данные в шаблон, включая все уникальные годы
             return await render_template('llc_agreements.html', agreements=agreements_list, all_years=sorted(all_years))
+
+        @self.app.route('/kdn-new', methods=['GET'])
+        @basic_auth_required()
+        async def kdn_new():
+            query = """
+            SELECT la.id, la.agreement_name, la.agreement_date, llc.name AS llc_name, llc.canton AS canton, ri.name AS engineer_name
+            FROM credentials.llc_agreements_new la
+            JOIN credentials.llc_credentials llc ON la.llc_id = llc.id
+            JOIN credentials.ri_credentials ri ON la.ri_id = ri.id
+            WHERE la.agreement_state = 1 AND llc.edrpou = %s;
+            """
+
+            agreements_data = await self.local_db.execute_query(query, (38736443,))
+
+            all_years = set()
+            agreements_list = []
+
+            for agreement in agreements_data:
+                agreement_dict = {
+                    'id': agreement[0],
+                    'agreement_name': agreement[1],
+                    'agreement_date': agreement[2],
+                    'llc_name': agreement[3],
+                    'canton': agreement[4],
+                    'engineer_name': agreement[5],
+                    'acts_by_year': {}
+                }
+
+                act_query = """
+                SELECT YEAR(act_date) AS act_year, MONTH(act_date) AS act_month
+                FROM credentials.llc_acts_new
+                WHERE act_state = 1 AND agreement = %s
+                ORDER BY act_year, act_month;
+                """
+                act_data = await self.local_db.execute_query(act_query, (agreement[0],))
+
+                for row in act_data:
+                    year, month = row
+                    if year not in agreement_dict['acts_by_year']:
+                        agreement_dict['acts_by_year'][year] = []
+                    agreement_dict['acts_by_year'][year].append(month)
+                    all_years.add(year)
+
+                agreements_list.append(agreement_dict)
+
+            return await render_template('kdn_new.html', agreements=agreements_list, all_years=sorted(all_years))
 
         @self.app.route('/correct_agreement/<int:id>', methods=['POST'])
         @basic_auth_required()
@@ -1672,8 +2065,6 @@ class MyApp:
                 except Exception as e:
                     await flash(f"Ошибка при загрузке данных: {e}")
                     print(f"Ошибка при загрузке данных: {e}")
-                finally:
-                    await self.local_db.close()
 
                 return redirect(url_for('estimates_upload'))
 
@@ -2301,7 +2692,7 @@ class MyApp:
             JOIN 
                 (
                     SELECT DISTINCT master_id, canton
-                    FROM credentials.fop_territory
+                    FROM credentials.fop_territory where transition is null
                 ) ter ON ter.master_id = a.master_id
             """
 
@@ -2459,7 +2850,8 @@ class MyApp:
                 return jsonify({"error": "Неверная позиция"}), 400
 
             try:
-                query = f"SELECT EXISTS(SELECT 1 FROM {table} WHERE inn = %s)"
+                quoted_table = quote_qualified_identifier(table)
+                query = f"SELECT EXISTS(SELECT 1 FROM {quoted_table} WHERE inn = %s)"
                 result = await self.local_db.execute_query(query, (inn,))
                 exists = result[0][0]  # Результат запроса (True или False)
 
@@ -2472,6 +2864,51 @@ class MyApp:
         @basic_auth_required()
         async def index():
             return await render_template('index.html')
+
+        @self.app.route('/api-test')
+        @basic_auth_required()
+        async def api_test():
+            remote_methods = [
+                {
+                    "name": "fetch-logs-and-store",
+                    "method": "GET",
+                    "endpoint": "fetch_logs_and_store",
+                    "route": "/fetch-logs-and-store",
+                    "remote_source": "command_logs.logs, mrtg.switches",
+                    "local_target": "dbsyphon.ntst_logs",
+                },
+                {
+                    "name": "fetch-and-store",
+                    "method": "GET",
+                    "endpoint": "fetch_and_store",
+                    "route": "/fetch-and-store",
+                    "remote_source": "pinger.HostLogs",
+                    "local_target": "dbsyphon.ntst_pinger_hosts_log",
+                },
+                {
+                    "name": "bdcom_list",
+                    "method": "POST",
+                    "endpoint": "bdcom_list",
+                    "route": "/bdcom_list",
+                    "remote_source": "mrtg.switches",
+                    "local_target": "dbsyphon.bdcom_list",
+                },
+                {
+                    "name": "sync-switches-report",
+                    "method": "GET",
+                    "endpoint": "sync_switches_report",
+                    "route": "/sync-switches-report",
+                    "remote_source": "mrtg.switches",
+                    "local_target": "dbsyphon.switches_report",
+                },
+            ]
+
+            base_url = request.url_root.rstrip("/")
+            for item in remote_methods:
+                item["url"] = url_for(item["endpoint"])
+                item["absolute_url"] = f"{base_url}{item['url']}"
+
+            return await render_template("api_test.html", remote_methods=remote_methods)
 
         @self.app.route('/device_report')
         @basic_auth_required()
@@ -2638,22 +3075,28 @@ class MyApp:
 
             # Формируем список IP-адресов для SQL запроса
             ip_list = [ip[0] for ip in ip_addresses]
-            formatted_ips = ','.join(f"'{ip}'" for ip in ip_list)
 
             # Получение всех ID из локальной базы данных
             local_ids_query = "SELECT id FROM ntst_pinger_hosts_log;"
             local_ids = await self.local_db.execute_query(local_ids_query)
-            local_ids_list = [str(id[0]) for id in local_ids]
-            formatted_ids = ','.join(local_ids_list)
+            local_ids_list = [id[0] for id in local_ids]
+
+            ip_placeholders = build_placeholders(ip_list)
+            remote_params = list(ip_list)
+            id_filter = ""
+            if local_ids_list:
+                id_placeholders = build_placeholders(local_ids_list)
+                id_filter = f"AND hl.id NOT IN ({id_placeholders})"
+                remote_params.extend(local_ids_list)
 
             # Запрос данных из удаленной базы данных для полученных IP-адресов
             remote_query = f"""
             SELECT hl.ip, hl.start, hl.stop, hl.id
             FROM pinger.HostLogs AS hl
-            WHERE hl.ip IN ({formatted_ips})
-            AND hl.id NOT IN ({formatted_ids});
+            WHERE hl.ip IN ({ip_placeholders})
+            {id_filter};
             """
-            remote_data = await self.remote_db.execute_query(remote_query)
+            remote_data = await self.remote_db.execute_query(remote_query, tuple(remote_params))
 
             # Закрытие соединения с удаленной базой данных
             await self.remote_db.close()
@@ -2814,8 +3257,9 @@ class MyApp:
                 # Вариант 3: Дата модификации отличается от сегодняшней - создаем архивную таблицу
                 # Создание таблицы history.switches_report_<сегодняшняя_дата>
                 archive_table_name = f"history.switches_report_{current_date.strftime('%Y_%m_%d')}"
+                quoted_archive_table = quote_qualified_identifier(archive_table_name)
                 create_archive_table_query = f"""
-                CREATE TABLE {archive_table_name} (
+                CREATE TABLE {quoted_archive_table} (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     canton VARCHAR(100),
                     model VARCHAR(100),
@@ -2828,7 +3272,7 @@ class MyApp:
 
                 # Копируем данные из `switches_report` в архивную таблицу
                 copy_to_archive_query = f"""
-                INSERT INTO {archive_table_name} (canton, model, ip, switch_rank, vetka)
+                INSERT INTO {quoted_archive_table} (canton, model, ip, switch_rank, vetka)
                 SELECT canton, model, ip, switch_rank, vetka
                 FROM dbsyphon.switches_report;
                 """

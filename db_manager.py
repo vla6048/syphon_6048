@@ -2,101 +2,94 @@ import aiomysql
 from aiomysql import Error as AiomysqlError, OperationalError, InterfaceError
 
 
+def _query_returns_rows(query):
+    return query.strip().upper().startswith(("SELECT", "SHOW", "DESCRIBE", "EXPLAIN"))
+
+
 class DatabaseManager:
-    # ⚠️ Удален pool_recycle, так как aiomysql.connect не использует его напрямую.
-    # Для управления циклом жизни соединений лучше использовать aiomysql.create_pool.
-    def __init__(self, host, user, password, db):
+    def __init__(self, host, user, password, db=None, minsize=1, maxsize=10):
         self.host = host
         self.user = user
         self.password = password
         self.db = db
-        self.connection = None
+        self.minsize = minsize
+        self.maxsize = maxsize
+        self.pool = None
 
     async def connect(self):
         """
-        Подключение к базе данных.
+        Создание пула подключений к базе данных.
         """
+        if self.pool and not self.pool.closed:
+            return
+
         try:
-            # 💡 Используем aiomysql.connect
-            self.connection = await aiomysql.connect(
+            self.pool = await aiomysql.create_pool(
                 host=self.host,
                 user=self.user,
                 password=self.password,
                 db=self.db,
-                # 💡 autocommit=True подходит для простого приложения, но
-                # для безопасности данных явные транзакции лучше. Оставим True,
-                # но предупредим о необходимости явного commit для INSERT/UPDATE/DELETE.
-                autocommit=True
+                minsize=self.minsize,
+                maxsize=self.maxsize,
+                autocommit=True,
+                pool_recycle=3600,
             )
-            print(f"Успешное подключение к базе данных {self.db} на {self.host}.")
+            print(f"Успешно создан пул подключений к базе данных {self.db} на {self.host}.")
         except AiomysqlError as e:
             print(f"Ошибка подключения к базе данных: {e}")
-            self.connection = None  # Убедимся, что connection сброшено
+            self.pool = None
 
     async def close(self):
         """
-        Закрытие соединения с базой данных.
+        Закрытие пула подключений к базе данных.
         """
-        if self.connection and not self.connection.closed:
-            self.connection.close()
-            self.connection = None
-            print(f"Соединение с базой данных {self.db} закрыто.")
+        if self.pool and not self.pool.closed:
+            self.pool.close()
+            await self.pool.wait_closed()
+            self.pool = None
+            print(f"Пул подключений к базе данных {self.db} закрыт.")
 
     async def ensure_connection(self):
         """
-        Убедитесь, что соединение активно и не закрыто, иначе переподключитесь.
+        Убедитесь, что пул подключений активен, иначе создайте его.
         """
-        # 🟢 ИСПРАВЛЕНИЕ: Проверяем, существует ли соединение И закрыто ли оно.
-        # aiomysql.Connection.closed - это атрибут (булево значение), а не метод.
-        is_closed = self.connection is None or self.connection.closed
-        if is_closed:
+        if self.pool is None or self.pool.closed:
             await self.connect()
-        # ⚠️ Дополнительная проверка на активность (ping) требует явного try/except
-        # и может быть ресурсозатратной. Для простого приложения достаточно проверки .closed.
+
+    async def _execute(self, query, params=None, return_lastrowid=False, retry=True):
+        await self.ensure_connection()
+        if not self.pool:
+            return None
+
+        try:
+            async with self.pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(query, params)
+                    if not _query_returns_rows(query):
+                        await connection.commit()
+                    if return_lastrowid:
+                        return cursor.lastrowid
+                    return await cursor.fetchall()
+        except (OperationalError, InterfaceError) as e:
+            if retry:
+                print(f"Потеря соединения: {e}. Повторная попытка...")
+                await self.close()
+                await self.connect()
+                return await self._execute(query, params, return_lastrowid, retry=False)
+            print(f"Повторная попытка не удалась: {e}")
+            return None
+        except AiomysqlError as e:
+            print(f"Ошибка выполнения запроса: {e}")
+            return None
 
     async def execute_insert(self, query, params=None):
         """
         Выполнение SQL-запроса INSERT и возврат ID вставленной записи.
         """
-        await self.ensure_connection()
-        if self.connection:
-            async with self.connection.cursor() as cursor:
-                try:
-                    await cursor.execute(query, params)
-                    # 💡 autocommit=True, но явный commit не помешает, если мы не уверены.
-                    # Для INSERT можно полагаться на autocommit.
-                    return cursor.lastrowid
-                except (OperationalError, InterfaceError) as e:
-                    # Повторная попытка после разрыва соединения
-                    print(f"Потеря соединения (INSERT): {e}. Повторная попытка...")
-                    await self.connect()
-                    return await self.execute_insert(query, params)  # Рекурсивный вызов
-                except AiomysqlError as e:
-                    print(f"Ошибка выполнения INSERT-запроса: {e}")
-                    return None
+        return await self._execute(query, params, return_lastrowid=True)
 
     async def execute_query(self, query, params=None):
         """
         Выполнение SQL запроса и возврат результата с проверкой состояния соединения.
         """
-        await self.ensure_connection()
-        if self.connection:
-            async with self.connection.cursor() as cursor:
-                try:
-                    await cursor.execute(query, params)
-
-                    # 💡 Для запросов, которые меняют данные (не SELECT), делаем commit.
-                    # Проверяем, является ли запрос SELECT. Это простая эвристика.
-                    if not query.strip().upper().startswith("SELECT"):
-                        await self.connection.commit()
-
-                    result = await cursor.fetchall()
-                    return result
-                except (OperationalError, InterfaceError) as e:
-                    # Повторная попытка после разрыва соединения
-                    print(f"Потеря соединения: {e}. Повторная попытка...")
-                    await self.connect()
-                    return await self.execute_query(query, params)  # Рекурсивный вызов
-                except AiomysqlError as e:
-                    print(f"Ошибка выполнения запроса: {e}")
-                    return None
+        return await self._execute(query, params)
