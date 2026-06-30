@@ -1,6 +1,7 @@
 from docx.oxml.ns import qn
 from docx.shared import Pt
 from openpyxl.styles import PatternFill
+from openpyxl.worksheet.properties import PageSetupProperties
 from num2words import num2words
 
 
@@ -106,6 +107,23 @@ def clear_workbook_highlights(workbook):
         for row in sheet.iter_rows():
             for cell in row:
                 cell.fill = empty_fill
+
+
+def prepare_workbook_for_pdf(workbook):
+    for sheet in workbook.worksheets:
+        sheet.print_area = sheet.calculate_dimension()
+        sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        sheet.page_setup.orientation = "portrait"
+        sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 1
+        sheet.page_setup.scale = None
+        sheet.sheet_view.view = "pageLayout"
+        sheet.print_options.horizontalCentered = True
+        sheet.page_margins.left = 0.25
+        sheet.page_margins.right = 0.25
+        sheet.page_margins.top = 0.25
+        sheet.page_margins.bottom = 0.25
 
 
 def convert_to_currency_words(amount):

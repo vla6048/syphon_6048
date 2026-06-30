@@ -27,6 +27,7 @@ from document_utils import (
     create_table,
     format_date,
     formatting_text,
+    prepare_workbook_for_pdf,
     replace_in_tables,
     replace_table_in_document,
     replace_text_in_document,
@@ -1687,6 +1688,7 @@ class MyApp:
                             if key in cell.value:
                                 cell.value = cell.value.replace(key, str(replacement))
             clear_workbook_highlights(workbook)
+            prepare_workbook_for_pdf(workbook)
 
             output = BytesIO()
             workbook.save(output)
