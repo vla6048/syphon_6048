@@ -906,9 +906,10 @@ class MyApp:
             UNIT_COST = 1000
 
             # Процентное распределение бюджета
-            rank1_share = random.uniform(0.10, 0.40)
-            rank2_share = random.uniform(0.40, 0.60)
-            consultation_share = 1 - (rank1_share + rank2_share)
+            consultation_share = random.uniform(0.05, 0.12)
+            equipment_share = 1 - consultation_share
+            rank1_share = equipment_share * random.uniform(0.35, 0.45)
+            rank2_share = equipment_share - rank1_share
 
             # Расчет бюджета для каждого ранга и консультаций
             rank1_budget = act_sum * rank1_share
@@ -937,8 +938,19 @@ class MyApp:
             rank1_units_target = floor(rank1_budget / UNIT_COST)
             rank2_units_target = floor(rank2_budget / UNIT_COST)
 
-            selected_rank1 = random.sample(rank1_data, min(rank1_units_target, len(rank1_data))) if rank1_data else []
-            selected_rank2 = random.sample(rank2_data, min(rank2_units_target, len(rank2_data))) if rank2_data else []
+            if rank1_data and rank1_units_target <= len(rank1_data):
+                selected_rank1 = random.sample(rank1_data, rank1_units_target)
+            elif rank1_data:
+                selected_rank1 = random.choices(rank1_data, k=rank1_units_target)
+            else:
+                selected_rank1 = []
+
+            if rank2_data and rank2_units_target <= len(rank2_data):
+                selected_rank2 = random.sample(rank2_data, rank2_units_target)
+            elif rank2_data:
+                selected_rank2 = random.choices(rank2_data, k=rank2_units_target)
+            else:
+                selected_rank2 = []
             rank1_units = len(selected_rank1)
             rank2_units = len(selected_rank2)
             selected_rank1_models = [row[0] for row in selected_rank1]

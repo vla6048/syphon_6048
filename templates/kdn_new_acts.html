@@ -36,7 +36,6 @@
                         <th>Месяц и год</th>
                         <th>Сумма</th>
                         <th>Сгенерировать данные</th>
-                        <th>Рахунок</th>
                         <th>АКТ</th>
                         <th>ЗВІТ</th>
                         <th>Удалить</th>
@@ -50,11 +49,6 @@
                         <td>
                             <form action="{{ url_for('generate_kdn_new_act_data', agreement_id=agreement_id, act_id=act.id) }}" method="post" style="display:inline;">
                                 <button type="submit" class="btn btn-warning" {% if act.has_data %}disabled{% endif %}>Сгенерировать данные</button>
-                            </form>
-                        </td>
-                        <td>
-                            <form action="{{ url_for('generate_kdn_new_bill', act_id=act.id) }}" method="post" style="display:inline;">
-                                <button type="submit" class="btn btn-primary" {% if not act.has_data %}disabled{% endif %}>Рахунок</button>
                             </form>
                         </td>
                         <td>
